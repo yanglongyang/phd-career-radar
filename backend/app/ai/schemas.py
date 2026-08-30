@@ -158,24 +158,21 @@ class JobEvaluationOut(BaseModel):
         return v
 
 
-class ReputationTopicOut(BaseModel):
-    """风评聚合的单主题结论：不输出绝对化判断，逐主题给出正/负来源数与证据等级。"""
+class ReputationTopicConclusion(BaseModel):
+    """AI 输出的单主题叙述结论。来源数/等级/时间跨度等数字一律由后端确定性
+    统计填充（Phase 6），AI 不得也不需要输出任何计数。"""
 
     model_config = ConfigDict(extra="forbid")
 
     topic: ReputationTopicLiteral
-    positive_sources: int = Field(ge=0)
-    negative_sources: int = Field(ge=0)
-    independent_sources: int = Field(ge=0)
-    evidence_levels: list[Literal["A", "B", "C", "D"]] = Field(default_factory=list)
-    time_start: str | None = None
-    time_end: str | None = None
     conclusion: str
 
 
-class ReputationSummaryOut(BaseModel):
+class ReputationSynthesisOut(BaseModel):
+    """AI 主题综合输出：只做叙述性聚合（发现主题、总结冲突与一致性）。"""
+
     model_config = ConfigDict(extra="forbid")
 
-    topics: list[ReputationTopicOut] = Field(default_factory=list)
+    topics: list[ReputationTopicConclusion] = Field(default_factory=list)
     overall_note: str = ""
     confidence: Literal["low", "medium", "high"] = "low"

@@ -9,7 +9,8 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 PROMPT_REGISTRY: dict[str, str] = {
     "job_extraction": "job_extraction_v1",
     "job_evaluation": "job_evaluation_v1",
-    "reputation_summary": "reputation_summary_v1",
+    # v2：AI 只输出主题叙述结论，计数改由后端确定性统计填充（Phase 6）
+    "reputation_summary": "reputation_summary_v2",
 }
 
 _PROMPT_CACHE: dict[str, str] = {}

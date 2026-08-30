@@ -194,6 +194,9 @@ def build_evaluation_context(db: Session, job: Job, profile: dict | None = None)
             "source_type": ev.source_type,
             "source_author": ev.source_author,
             "published_at": str(ev.published_at) if ev.published_at else None,
+            # Phase 6：unknown scope 不自动升级为"全校通用证据"——仍提供给模型
+            # 作参考，但明确标记不可支撑 reputation 定量分（finalize 强制）
+            "eligible_for_reputation_scoring": ev.scope_level != "unknown",
         }
         for ev in candidates
         if evidence_in_scope(job, ev)
@@ -331,7 +334,15 @@ def finalize_evaluation(
     # Region 与 reputation 的最终值由 snapshot 决定，调用方传入的值一律覆盖
     final_scores = dict(dimension_scores)
     final_scores["region"] = (input_snapshot.get("region") or {}).get("score")
-    if not input_snapshot.get("evidence"):
+    # Phase 6 reputation guard：没有任何"够格支撑评分"的证据（eligible 标志，
+    # 如 unknown scope 线索）时，reputation 强制为 null —— 旧快照无标志按 True 兼容
+    evidence_snapshot = input_snapshot.get("evidence") or []
+    reputation_eligible = any(
+        bool(item.get("eligible_for_reputation_scoring", True))
+        for item in evidence_snapshot
+        if isinstance(item, dict)
+    )
+    if not reputation_eligible:
         final_scores["reputation"] = None
 
     total = compute_total(final_scores)

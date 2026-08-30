@@ -34,6 +34,8 @@ import {
   formatDate,
 } from "../lib/utils";
 import type { AcademicJobDetails } from "../types";
+import EvidenceTab from "../components/EvidenceTab";
+import ReputationTab from "../components/ReputationTab";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -480,18 +482,10 @@ export default function JobDetailPage() {
         )}
 
         {tab === "reputation" && (
-          <EmptyState
-            title="风评聚合将在 Phase 6 提供"
-            hint="按主题聚合正/负面来源数、独立来源数与证据等级（A/B/C/D），不输出绝对化判断。"
-          />
+          <ReputationTab organizationId={job.organization?.id ?? null} />
         )}
 
-        {tab === "evidence" && (
-          <EmptyState
-            title="Evidence 管理将在 Phase 6 提供"
-            hint="每条重要结论（考核要求、启动经费、待遇兑现等）都可追溯到来源与证据等级。"
-          />
-        )}
+        {tab === "evidence" && <EvidenceTab jobId={job.id} />}
 
         {tab === "application" && (
           applicationQuery.isLoading ? (

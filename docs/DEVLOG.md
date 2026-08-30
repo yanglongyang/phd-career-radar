@@ -520,3 +520,38 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 ### 测试 / lint / build
 
 - pytest：133 passed；vitest：**17 passed**（9 → 17）；ruff：All checks passed；前端 build：通过。
+
+---
+
+## Phase 6 — Evidence & Reputation（2026-08-31 完成）
+
+模式沿用 Phase 4 已验证的边界：**Evidence 事实资产 → 确定性统计 → AI 主题叙述综合 → 确定性 eligibility → Reputation UI**。三件必须锁死的事全部落实。
+
+### 已实现
+
+1. **Evidence CRUD API**（`/api/evidence`）：岗位挂载（自动继承单位）/ 组织级挂载、部分更新（EvidenceUpdate 全可选）、删除（**同步清理 EvaluationEvidence 关联**，不留悬挂引用）；列表按单位/岗位/类别过滤。完整 provenance 字段全面开放：独立来源键、第一手/转述、转载关系、立场、作用域层级+名称、等级、原文摘录。
+2. **确定性风评统计**（`services/reputation.py`，纯计算不调 AI）：
+   - **independence_key 去重**：同 key 同源（含转载跟随源头）；无 key 自成一源；
+   - 逐主题（11 类）统计：正/负来源数（组级 stance，混杂归负面——保守）、独立来源数、等级分布、时间跨度；
+   - **eligibility 门槛**：独立源 ≥ 2 且等级含 A/B → 可进入定量评分；否则仅情报参考（原因文案明确）；
+   - **unknown scope 降级**：不自动升级为"全校通用证据"，降为情报线索单独列出；lab 级同理；岗位级证据不进校级统计；
+   - department 过滤：限定院系时校级证据仍纳入、不匹配的院系证据降为线索。
+3. **AI 主题综合（prompt v2）**：`POST /organizations/{id}/reputation/synthesize` —— 后端统计（statistics）+ 证据给 AI，AI 输出 `ReputationSynthesisOut`（**只有 topic + conclusion**，无任何计数字段，extra=forbid）；后端把结论合并进确定性报告。AI 未配置 503、失败 502。GET 报告永远纯确定性、不需要 AI。
+4. **Evaluation 集成**：context 中每条证据带 `eligible_for_reputation_scoring` 标志（unknown → false）；finalize 的 reputation guard 扩展——无 eligible 证据时强制 reputation=null（旧快照无标志按 True 兼容）。测试：unknown 证据 + AI 硬给 85 → 落库 null；eligible 证据 + AI 70 → 正常保留。
+5. **前端**：详情页 Evidence 页签（岗位级 + 单位级两组证据、创建表单含全部 provenance 字段、删除）；Reputation 页签（逐主题卡片：正/负/独立源数、等级、时间跨度、eligibility 徽标 + 原因、AI 结论、情报线索列表、"生成 AI 综合分析"按钮含 503 透明报错）。
+
+### 数据库变化
+
+- 无新表/新列（reputation 报告按需计算不持久化）；无新 migration。
+
+### 测试 / lint / build
+
+- pytest：**147 passed**（新增 14 项：CRUD、关联清理、去重/转载/stance 分组、eligibility 三档、unknown/lab/岗位级降级、department 过滤、AI 合并、503、纯确定性 GET、评估 guard 正反例、AI schema forbid）
+- vitest：17 passed；ruff：All checks passed；前端 build：通过
+- 浏览器端到端：证据创建 → 聚合报告渲染（逐主题 eligibility 与线索）→ AI 综合入口。
+
+### 明确未实现
+
+- **Phase 7 设置页可视化、批量重评、Collector 架构、历史时间线等收尾项未实现**。
+- Evidence selection/ranking（大量证据时的挑选策略）留 Phase 7/优化阶段——当前按 id 排序全量纳入。
+- unknown scope 的语义（本阶段：线索）如需进一步细分（例如允许用户手动提升）留待真实使用反馈。

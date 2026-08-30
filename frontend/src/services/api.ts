@@ -102,3 +102,35 @@ export async function updateApplication(
 export async function deleteApplication(applicationId: number) {
   return api<void>(`/applications/${applicationId}`, { method: "DELETE" });
 }
+
+export async function listEvidence(params: { job_id?: number; organization_id?: number; category?: string }) {
+  return api<import("../types").Evidence[]>(`/evidence${buildQuery(params)}`);
+}
+
+export async function createJobEvidence(jobId: number, payload: import("../types").EvidenceCreateInput) {
+  return api<import("../types").Evidence>(`/evidence/jobs/${jobId}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createOrgEvidence(orgId: number, payload: import("../types").EvidenceCreateInput) {
+  return api<import("../types").Evidence>(`/evidence/organizations/${orgId}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteEvidence(evidenceId: number) {
+  return api<void>(`/evidence/${evidenceId}`, { method: "DELETE" });
+}
+
+export async function getReputationReport(orgId: number) {
+  return api<import("../types").ReputationReport>(`/organizations/${orgId}/reputation`);
+}
+
+export async function synthesizeReputation(orgId: number) {
+  return api<import("../types").ReputationReport>(`/organizations/${orgId}/reputation/synthesize`, {
+    method: "POST",
+  });
+}

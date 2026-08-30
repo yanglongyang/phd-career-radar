@@ -7,8 +7,8 @@ from app.ai.provider import AIOutputError, OpenAICompatibleProvider, parse_llm_j
 from app.ai.schemas import (
     EvaluationScores,
     JobEvaluationOut,
-    ReputationSummaryOut,
-    ReputationTopicOut,
+    ReputationSynthesisOut,
+    ReputationTopicConclusion,
 )
 
 VALID_EVAL = {
@@ -72,30 +72,35 @@ def test_scores_missing_fields_default_none():
     assert scores.fit is None and scores.long_term is None
 
 
-def test_reputation_topic_strict_schema():
-    """Phase 2.1：风评聚合不再接受 list[dict] 的宽松结构。"""
-    topic = ReputationTopicOut.model_validate(
+def test_reputation_synthesis_strict_schema():
+    """Phase 6：AI 风评输出只含主题叙述结论 —— 计数由后端确定性统计填充，
+    模型不得输出任何数字字段。"""
+    synthesis = ReputationSynthesisOut.model_validate(
         {
-            "topic": "assessment_pressure",
-            "positive_sources": 1,
-            "negative_sources": 2,
-            "independent_sources": 3,
-            "evidence_levels": ["B", "C"],
-            "time_start": "2024-03",
-            "time_end": "2026-05",
-            "conclusion": "存在较多关于考核压力的负面反馈。",
+            "topics": [
+                {"topic": "assessment_pressure", "conclusion": "统计显示考核压力反馈较多。"}
+            ],
+            "overall_note": "",
+            "confidence": "medium",
         }
     )
-    assert topic.independent_sources == 3
+    assert synthesis.topics[0].topic == "assessment_pressure"
+    assert not hasattr(synthesis.topics[0], "independent_sources")
+    # 非法主题拒绝
     with pytest.raises(ValidationError):
-        ReputationTopicOut.model_validate({**topic.model_dump(), "topic": "whatever_topic"})
+        ReputationSynthesisOut.model_validate(
+            {"topics": [{"topic": "whatever", "conclusion": "x"}]}
+        )
+    # 模型擅自输出计数字段 → extra=forbid 拒绝
     with pytest.raises(ValidationError):
-        ReputationTopicOut.model_validate({**topic.model_dump(), "negative_sources": -1})
+        ReputationTopicConclusion.model_validate(
+            {"topic": "other", "conclusion": "x", "independent_sources": 3}
+        )
 
 
 def test_reputation_summary_rejects_arbitrary_topics():
     with pytest.raises(ValidationError):
-        ReputationSummaryOut.model_validate(
+        ReputationSynthesisOut.model_validate(
             {"topics": [{"whatever": 123}], "overall_note": "", "confidence": "low"}
         )
 

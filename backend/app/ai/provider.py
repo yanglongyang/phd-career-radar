@@ -15,7 +15,11 @@ import httpx
 from pydantic import ValidationError
 
 from app.ai.prompts import get_prompt
-from app.ai.schemas import JobEvaluationOut, JobExtractionOut, ReputationSummaryOut
+from app.ai.schemas import (
+    JobEvaluationOut,
+    JobExtractionOut,
+    ReputationSynthesisOut,
+)
 from app.core.config import Settings, get_settings
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
@@ -59,8 +63,8 @@ class LLMProvider(ABC):
         """返回 (结构化评估, prompt_version)。"""
 
     @abstractmethod
-    def summarize_reputation(self, evidence: list[dict]) -> tuple[ReputationSummaryOut, str]:
-        """返回 (风评聚合, prompt_version)。"""
+    def summarize_reputation(self, context: dict) -> tuple[ReputationSynthesisOut, str]:
+        """返回 (AI 主题综合结论, prompt_version)。计数由后端统计填充。"""
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -125,8 +129,8 @@ class OpenAICompatibleProvider(LLMProvider):
     def evaluate_job(self, context: dict) -> tuple[JobEvaluationOut, str]:
         return self._complete_json("job_evaluation", context, JobEvaluationOut)
 
-    def summarize_reputation(self, evidence: list[dict]) -> tuple[ReputationSummaryOut, str]:
-        return self._complete_json("reputation_summary", {"evidence": evidence}, ReputationSummaryOut)
+    def summarize_reputation(self, context: dict) -> tuple[ReputationSynthesisOut, str]:
+        return self._complete_json("reputation_summary", context, ReputationSynthesisOut)
 
 
 def get_provider(settings: Settings | None = None) -> LLMProvider | None:

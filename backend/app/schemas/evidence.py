@@ -44,6 +44,27 @@ class EvidenceCreate(BaseModel):
     organization_id: int | None = None
 
 
+class EvidenceUpdate(BaseModel):
+    """部分更新：全字段可选；省略 = 不修改。"""
+
+    claim: str | None = Field(default=None, min_length=1)
+    category: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    source_title: str | None = None
+    source_author: str | None = None
+    is_firsthand: bool | None = None
+    independence_key: str | None = None
+    repost_of_evidence_id: int | None = None
+    stance: StanceLiteral | None = None
+    scope_level: ScopeLiteral | None = None
+    scope_name: str | None = None
+    evidence_level: EvidenceLevelLiteral | None = None
+    published_at: date | None = None
+    confidence: Literal["low", "medium", "high"] | None = None
+    raw_excerpt: str | None = None
+
+
 class EvidenceOut(BaseModel):
     id: int
     job_id: int | None = None

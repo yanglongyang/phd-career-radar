@@ -313,3 +313,73 @@ export interface ApplicationCreateInput {
 }
 
 export interface ApplicationUpdateInput extends ApplicationCreateInput {}
+
+export interface Evidence {
+  id: number;
+  job_id: number | null;
+  organization_id: number | null;
+  category: string;
+  claim: string;
+  source_type: string | null;
+  source_url: string | null;
+  source_title: string | null;
+  source_author: string | null;
+  is_firsthand: boolean | null;
+  independence_key: string | null;
+  repost_of_evidence_id: number | null;
+  stance: string;
+  scope_level: string;
+  scope_name: string | null;
+  evidence_level: string;
+  published_at: string | null;
+  collected_at: string;
+  confidence: string | null;
+  raw_excerpt: string | null;
+  created_at: string;
+}
+
+export interface EvidenceCreateInput {
+  claim: string;
+  category?: string;
+  source_type?: string | null;
+  source_url?: string | null;
+  source_title?: string | null;
+  source_author?: string | null;
+  is_firsthand?: boolean | null;
+  independence_key?: string | null;
+  repost_of_evidence_id?: number | null;
+  stance?: string;
+  scope_level?: string;
+  scope_name?: string | null;
+  evidence_level?: string;
+  published_at?: string | null;
+  confidence?: string | null;
+  raw_excerpt?: string | null;
+  organization_id?: number | null;
+}
+
+export interface ReputationTopicStat {
+  topic: string;
+  positive_sources: number;
+  negative_sources: number;
+  independent_sources: number;
+  evidence_levels: string[];
+  time_start: string | null;
+  time_end: string | null;
+  eligible_for_scoring: boolean;
+  eligible_reason: string;
+  evidence_ids: number[];
+  ai_conclusion: string | null;
+}
+
+export interface ReputationReport {
+  organization_id: number;
+  organization_name: string;
+  department: string | null;
+  topics: ReputationTopicStat[];
+  clues: { evidence_id: number; claim: string; reason: string }[];
+  overall_confidence: string;
+  synthesized_by_ai: boolean;
+  prompt_version: string | null;
+  generated_at: string;
+}
