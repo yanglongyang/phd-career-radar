@@ -29,7 +29,6 @@
     "fit": 0-100 或 null,
     "career_stability": 0-100 或 null,
     "research_resources": 0-100 或 null,
-    "region": 0-100 或 null,
     "compensation": 0-100 或 null,
     "reputation": 0-100 或 null,
     "workload": 0-100 或 null,
@@ -58,7 +57,7 @@
 - `fit`：研究方向/技能与用户 Profile 的匹配（直接重合 > 高度相关 > 可迁移 > 需转型 > 不相关）
 - `career_stability`：结合 establishment/tenure/contract/funding 四个维度综合判断聘用稳定性
 - `research_resources`：平台、启动经费、实验室空间、招生指标
-- `region`：参考输入中的地区基准信息（可能为 null）
+- `region` 维度不需要输出：系统会根据用户地区配置自动计算（输入中的地区基准信息仅供你在 summary 中讨论）
 - `compensation`：区分固定收入与绩效占比；高度依赖绩效要在 risk_items 中体现
 - `reputation`：仅基于提供的 Evidence；无证据时 null
 - `workload`：教学、行政负担；公告未提及时 null

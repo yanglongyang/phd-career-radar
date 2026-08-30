@@ -82,7 +82,10 @@ def evidence_in_scope(job: Job, evidence: Evidence) -> bool:
     if evidence.scope_level in ("organization", "unknown"):
         return True
     if evidence.scope_level == "department":
-        return normalize_text(evidence.scope_name) == normalize_text(job.department or "")
+        # 院系归属必须双方都明确：任一侧为空即不匹配，不猜
+        if not evidence.scope_name or not job.department:
+            return False
+        return normalize_text(evidence.scope_name) == normalize_text(job.department)
     return False  # lab 及未知层级且无岗位绑定的，一律不猜
 
 
@@ -98,6 +101,7 @@ def _job_context_dict(job: Job) -> dict:
             "contract_type": details.contract_type,
             "funding_source": details.funding_source,
             "contract_years": details.contract_years,
+            "first_contract_period": details.first_contract_period,
             "is_up_or_out": details.is_up_or_out,
             "midterm_review": details.midterm_review,
             "final_review": details.final_review,
@@ -219,9 +223,24 @@ def validate_input_snapshot(snapshot: object) -> None:
 
 
 def _validate_evidence_consistency(
-    db: Session, job: Job, provided_ids: list[int], ai_output: AIEvaluationOut
+    db: Session, job: Job, provided_ids: list[int], ai_output: AIEvaluationOut, input_snapshot: dict
 ) -> None:
-    """risk_items.evidence_ids ⊆ 本次 evaluation evidence_ids ⊆ 作用域内的真实 Evidence。"""
+    """审计三重强一致（Phase 4.1.1）：
+    模型实际看到的 Evidence（input_snapshot）
+    = 本次 evaluation 的 evidence_ids
+    = EvaluationEvidence 审计关联
+    且全部位于作用域内、真实存在；risk 条目引用 ⊆ 本次 evaluation evidence_ids。"""
+    snapshot = input_snapshot if isinstance(input_snapshot, dict) else {}
+    snapshot_ids = {
+        item.get("id")
+        for item in (snapshot.get("evidence") or [])
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    if set(provided_ids) != snapshot_ids:
+        raise ValueError(
+            f"Evidence 关联与输入快照不一致（snapshot={sorted(snapshot_ids)} / "
+            f"provided={sorted(provided_ids)}）；模型看到的 Evidence 必须与审计关联完全一致，拒绝保存评估"
+        )
     if provided_ids:
         rows = db.scalars(select(Evidence).where(Evidence.id.in_(provided_ids))).all()
         found = {ev.id for ev in rows}
@@ -255,11 +274,10 @@ def evaluate_job(
     validate_input_snapshot(context)
     ai_output, prompt_version = provider.evaluate_job(context)
 
-    # 维度分确定性合成（Phase 4.1）：
-    # - region 只由用户配置决定（unrated → null），AI 不得覆盖；
+    # 维度分确定性合成（Phase 4.1.1）：
+    # - region 维度已从 AI Schema 移除，只由 Region Engine（用户配置）决定；
     # - 无可用 Evidence 时强制 reputation=null，不靠 Prompt 自觉。
     scores = ai_output.scores.model_dump()
-    scores.pop("region", None)
     if not context["evidence"]:
         scores["reputation"] = None
     dimension_scores = {**scores, "region": context["region"]["score"]}
@@ -300,7 +318,7 @@ def finalize_evaluation(
     """
     validate_input_snapshot(input_snapshot)
     provided_ids = list(dict.fromkeys(evidence_ids or []))
-    _validate_evidence_consistency(db, job, provided_ids, ai_output)
+    _validate_evidence_consistency(db, job, provided_ids, ai_output, input_snapshot)
 
     snapshots = config_snapshots(profile)
     effective_risk = compute_effective_risk(ai_output)

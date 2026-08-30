@@ -13,7 +13,7 @@ from app.ai.schemas import (
 
 VALID_EVAL = {
     "summary": "岗位与研究方向高度相关。",
-    "scores": {"fit": 85, "career_stability": 70, "region": 75, "compensation": None},
+    "scores": {"fit": 85, "career_stability": 70, "compensation": None},
     "risk_level": "medium",
     "risk_items": [
         {"type": "up_or_out", "severity": "high", "reason": "预聘制考核要求尚未找到官方文件", "evidence_ids": [12, 17]}
@@ -41,6 +41,13 @@ def test_evaluation_schema_accepts_valid():
     assert out.scores.compensation is None  # 信息不足 → null，不编造
     assert out.risk_items[0].severity == "high"
     assert out.risk_items[0].evidence_ids == [12, 17]
+
+
+def test_evaluation_scores_have_no_region_field():
+    """Phase 4.1.1：region 由后端 Region Engine 唯一决定，AI Schema 不再有该字段。"""
+    assert "region" not in EvaluationScores.model_fields
+    with pytest.raises(ValidationError):
+        EvaluationScores.model_validate({"fit": 80, "region": 75})
 
 
 def test_ai_schema_has_no_recommendation_or_total():

@@ -38,7 +38,7 @@ def _make_ai_output(
     return JobEvaluationOut.model_validate(
         {
             "summary": "岗位与研究方向高度相关，但预聘考核要求需要进一步核实。",
-            "scores": scores or {"fit": 90, "region": 80, "career_stability": None},
+            "scores": scores or {"fit": 90, "career_stability": None},
             "risk_level": risk_level,
             "risk_items": risk_items,
             "strengths": ["研究方向匹配"],
@@ -131,12 +131,16 @@ def test_finalize_links_evidence(client, sample_job, db_session):
     db_session.add(evidence)
     db_session.commit()
 
+    snapshot = {
+        **INPUT_SNAPSHOT,
+        "evidence": [{"id": evidence.id, "claim": evidence.claim, "evidence_level": "A"}],
+    }
     evaluation = finalize_evaluation(
         db_session,
         db_session.get(Job, sample_job["id"]),
         ai_output=_make_ai_output(),
         dimension_scores={"fit": 90},
-        input_snapshot=INPUT_SNAPSHOT,
+        input_snapshot=snapshot,
         evidence_ids=[evidence.id],
     )
     db_session.commit()
@@ -168,12 +172,16 @@ def test_finalize_rejects_risk_item_evidence_not_provided(client, sample_job, db
     evidence = Evidence(job_id=sample_job["id"], claim="预聘制聘期三年", evidence_level="A")
     db_session.add(evidence)
     db_session.commit()
+    snapshot = {
+        **INPUT_SNAPSHOT,
+        "evidence": [{"id": evidence.id, "claim": evidence.claim, "evidence_level": "A"}],
+    }
     evaluation = finalize_evaluation(
         db_session,
         db_session.get(Job, sample_job["id"]),
         ai_output=_make_ai_output(item_severity="high", item_evidence_ids=[evidence.id]),
         dimension_scores={"fit": 90},
-        input_snapshot=INPUT_SNAPSHOT,
+        input_snapshot=snapshot,
         evidence_ids=[evidence.id],
     )
     db_session.commit()
@@ -182,13 +190,14 @@ def test_finalize_rejects_risk_item_evidence_not_provided(client, sample_job, db
 
 def test_finalize_rejects_nonexistent_evidence(client, sample_job, db_session):
     """evidence_ids 引用数据库不存在的证据 → 拒绝保存。"""
+    snapshot = {**INPUT_SNAPSHOT, "evidence": [{"id": 999999, "claim": "幽灵证据"}]}
     with pytest.raises(ValueError, match="不存在的证据"):
         finalize_evaluation(
             db_session,
             db_session.get(Job, sample_job["id"]),
             ai_output=_make_ai_output(),
             dimension_scores={"fit": 90},
-            input_snapshot=INPUT_SNAPSHOT,
+            input_snapshot=snapshot,
             evidence_ids=[999999],
         )
     assert db_session.query(JobEvaluation).count() == 0
@@ -233,13 +242,17 @@ def test_finalize_rejects_out_of_scope_evidence(client, sample_job, db_session):
     foreign = Evidence(job_id=other_job["id"], claim="别家单位的证据", evidence_level="C")
     db_session.add(foreign)
     db_session.commit()
+    snapshot = {
+        **INPUT_SNAPSHOT,
+        "evidence": [{"id": foreign.id, "claim": foreign.claim, "evidence_level": "C"}],
+    }
     with pytest.raises(ValueError, match="不属于当前岗位"):
         finalize_evaluation(
             db_session,
             db_session.get(Job, sample_job["id"]),
             ai_output=_make_ai_output(),
             dimension_scores={"fit": 90},
-            input_snapshot=INPUT_SNAPSHOT,
+            input_snapshot=snapshot,
             evidence_ids=[foreign.id],
         )
 
@@ -250,10 +263,10 @@ class _RegionProvider(LLMProvider):
 
     def evaluate_job(self, context: dict):
         self.context = context
-        # AI 擅自给城市打分 —— 必须被用户配置基准覆盖/忽略
+        # Phase 4.1.1：AI Schema 已无 region 字段，模型连"发表地区分"的入口都没有
         return (
             AIEvalOut.model_validate(
-                {"summary": "", "scores": {"fit": 80, "region": 75},
+                {"summary": "", "scores": {"fit": 80},
                  "risk_level": "medium", "confidence": "medium"}
             ),
             "job_evaluation_v1",
@@ -274,7 +287,7 @@ def test_region_score_from_config_only_ai_cannot_override(client, sample_job, db
     # context 里基准为 unrated → None（regions.yaml 默认全空）
     assert provider.context["region"]["score"] is None
     assert provider.context["region"]["tier"] == "unrated"
-    # 落库的 region_score 也只能是基准（None），不是 AI 的 75
+    # 落库的 region_score 只能是基准（None）
     assert evaluation.region_score is None
 
     # 用户配置了基准时（mock preferred 90），AI 的 75 依然被忽略
@@ -295,7 +308,7 @@ class _SimpleProvider(LLMProvider):
         self.seen_contexts: list[dict] = []
         self.output = output or {
             "summary": "岗位匹配度高，但预聘考核需要核实。",
-            "scores": {"fit": 90, "region": None, "career_stability": 70},
+            "scores": {"fit": 90, "career_stability": 70},
             "risk_level": "medium",
             "risk_items": [
                 {"type": "up_or_out", "severity": "high",
@@ -320,6 +333,10 @@ class _SimpleProvider(LLMProvider):
 
 def test_evaluate_job_full_flow(client, sample_job, db_session):
     """Phase 4 全链路：context 自动构造 → AI → finalize → 落库 → 审计完整。"""
+    client.patch(
+        f"/api/jobs/{sample_job['id']}/academic-details",
+        json={"first_contract_period": "3+3 年", "tenure_status": "tenure_track"},
+    )
     provider = _SimpleProvider()
     job = db_session.get(Job, sample_job["id"])
     evaluation = evaluate_job(db_session, job, provider)
@@ -334,6 +351,8 @@ def test_evaluate_job_full_flow(client, sample_job, db_session):
     # Phase 4.1 P0-1：AI 必须看到单位名与 JD 正文（fit 等维度的核心输入）
     assert ctx["job"]["organization"]["name"] == sample_job["organization"]["name"]
     assert ctx["job"]["description_raw"] == sample_job["description_raw"]
+    # Phase 4.1.1：首聘周期必须进入 context（此前遗漏的关键高校字段）
+    assert ctx["job"]["academic_details"]["first_contract_period"] == "3+3 年"
     # region 合成：AI null → 系统基准（regions.yaml 全空 → unrated → None）
     assert evaluation.region_score is None
     # fit(20)+career_stability(15) → coverage 35；(90*20+70*15)/35 = 81.4
@@ -474,3 +493,59 @@ def test_audit_evidence_items_frozen_from_snapshot(client, sample_job, db_sessio
     item = data["evidence_items"][0]
     assert item["id"] == evidence.id
     assert item["claim"] == "启动经费到账普遍超过一年"  # 模型当时看到的旧文本，不是修改后的
+
+
+def test_finalize_rejects_snapshot_provided_mismatch(client, sample_job, db_session):
+    """Phase 4.1.1 核心不变量：input_snapshot 的 Evidence IDs 必须与
+    provided evidence_ids 完全一致 —— 模型看到的与审计关联的不能是两套。"""
+    evidence = Evidence(job_id=sample_job["id"], claim="真实证据", evidence_level="A")
+    db_session.add(evidence)
+    db_session.commit()
+
+    # 快照没有证据，但关联声称用了 evidence.id → 逻辑上不可能成立的历史
+    with pytest.raises(ValueError, match="不一致"):
+        finalize_evaluation(
+            db_session,
+            db_session.get(Job, sample_job["id"]),
+            ai_output=_make_ai_output(),
+            dimension_scores={"fit": 90},
+            input_snapshot=INPUT_SNAPSHOT,
+            evidence_ids=[evidence.id],
+        )
+
+    # 反向：快照里有证据，但关联为空 → 同样拒绝
+    snapshot_with = {
+        **INPUT_SNAPSHOT,
+        "evidence": [{"id": evidence.id, "claim": evidence.claim, "evidence_level": "A"}],
+    }
+    with pytest.raises(ValueError, match="不一致"):
+        finalize_evaluation(
+            db_session,
+            db_session.get(Job, sample_job["id"]),
+            ai_output=_make_ai_output(),
+            dimension_scores={"fit": 90},
+            input_snapshot=snapshot_with,
+            evidence_ids=None,
+        )
+    assert db_session.query(JobEvaluation).count() == 0
+
+
+def test_department_scope_requires_both_sides_non_empty():
+    """Phase 4.1.1：department 匹配要求 scope_name 与 job.department 都非空，
+    双方都为空归一成 "" 不能算匹配（不猜）。"""
+    from types import SimpleNamespace
+
+    from app.services.evaluation import evidence_in_scope
+
+    job_no_dept = SimpleNamespace(id=1, organization_id=10, department=None)
+    job_with_dept = SimpleNamespace(id=1, organization_id=10, department="化学学院")
+
+    ev_no_name = SimpleNamespace(job_id=None, organization_id=10,
+                                 scope_level="department", scope_name=None)
+    ev_named = SimpleNamespace(job_id=None, organization_id=10,
+                               scope_level="department", scope_name="化学学院")
+
+    assert not evidence_in_scope(job_with_dept, ev_no_name)   # scope_name 为空
+    assert not evidence_in_scope(job_no_dept, ev_named)       # job.department 为空
+    assert not evidence_in_scope(job_no_dept, ev_no_name)     # 双方都空
+    assert evidence_in_scope(job_with_dept, ev_named)         # 双方明确且一致

@@ -331,3 +331,39 @@
 ### 明确未实现
 
 - **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合（Phase 6）、Evidence selection/ranking（Phase 6）未实现。
+
+---
+
+## Phase 4.1.1 — Final Audit Invariants（2026-08-31 完成）
+
+第六轮审查后的极小 hotfix，四项不变量封死后 **Phase 4 冻结**。无新 migration。
+
+1. **Snapshot Evidence ↔ EvaluationEvidence 强一致（核心）**：`finalize_evaluation()` 强制
+   `input_snapshot["evidence"] 的 ID 集合 == provided evidence_ids 集合`，不一致直接拒绝保存。
+   从此"模型实际看到的 Evidence = input_snapshot 冻结的 Evidence = EvaluationEvidence 审计关联"
+   三者恒等——即使未来批量重评等服务直接调用 finalize，也不可能产生"快照无证据但审计关联了
+   #123"这种逻辑上不可能成立的历史。测试覆盖正反两个方向。
+2. **first_contract_period 进入 Evaluation Context**：此前合同年限/中期/聘期考核都在，
+   唯独首聘周期遗漏；现在随 academic_details 进入 context，全链路测试断言 `"3+3 年"` 出现在
+   模型输入中。
+3. **department scope 双非空才可匹配**：`scope_name` 或 `job.department` 任一为空即不匹配，
+   不再出现"双方都归一成空串反而判为匹配"的边界。四个边界组合有测试。
+4. **region 从 AI Schema/Prompt 彻底删除**：`EvaluationScores` 只剩七个 AI 维度
+   （fit/career_stability/research_resources/compensation/reputation/workload/long_term），
+   region 由后端 Region Engine（用户配置）唯一计算 —— 与 recommendation_level 同样的
+   "单一权威"处理。Schema forbid 下模型连输出 region 的入口都不存在；Prompt 已同步。
+   顺带：前端导入页薪资周期下拉补齐 day/hour，与 Schema 枚举完全对齐。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**117 passed**（新增 snapshot/provided 双向不一致、department 四边界、region 字段禁用等）
+- vitest：9 passed；ruff：All checks passed；前端 build：通过
+
+### 明确未实现
+
+- **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合（Phase 6，
+  含 unknown scope 的"情报线索 vs 计量输入"策略）未实现。

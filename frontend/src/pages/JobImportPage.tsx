@@ -301,6 +301,8 @@ export default function JobImportPage() {
                     <option value="">未知</option>
                     <option value="year">年</option>
                     <option value="month">月</option>
+                    <option value="day">日</option>
+                    <option value="hour">时</option>
                     <option value="unknown">unknown</option>
                   </Select>
                 </Field>

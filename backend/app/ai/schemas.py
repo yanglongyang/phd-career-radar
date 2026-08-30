@@ -95,12 +95,13 @@ class JobExtractionOut(BaseModel):
 
 
 class EvaluationScores(BaseModel):
+    """AI 只输出七个维度；region 由后端 Region Engine（用户配置）唯一决定，
+    不给模型"发表一个不会被使用的分数"的机会（Phase 4.1.1）。"""
 
     model_config = ConfigDict(extra="forbid")
     fit: Score | None = None
     career_stability: Score | None = None
     research_resources: Score | None = None
-    region: Score | None = None
     compensation: Score | None = None
     reputation: Score | None = None
     workload: Score | None = None
