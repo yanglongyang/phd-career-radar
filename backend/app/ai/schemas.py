@@ -169,10 +169,12 @@ class ReputationTopicConclusion(BaseModel):
 
 
 class ReputationSynthesisOut(BaseModel):
-    """AI 主题综合输出：只做叙述性聚合（发现主题、总结冲突与一致性）。"""
+    """AI 主题综合输出：只做叙述性聚合（发现主题、总结冲突与一致性）。
+
+    Phase 6.1：不包含 confidence / overall_note —— overall_confidence 由
+    后端确定性规则（任一 eligible 主题 → medium，否则 low）唯一决定，
+    AI 不得把确定性 low 拔高成 high。"""
 
     model_config = ConfigDict(extra="forbid")
 
     topics: list[ReputationTopicConclusion] = Field(default_factory=list)
-    overall_note: str = ""
-    confidence: Literal["low", "medium", "high"] = "low"

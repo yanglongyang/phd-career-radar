@@ -27,10 +27,10 @@
       "topic": "assessment_pressure",
       "conclusion": "统计显示 3 个独立来源提到考核压力较高，其中 2 条为第一手经历；不同来源对压力程度的描述存在差异，建议进一步核实学校正式考核文件。"
     }
-  ],
-  "overall_note": "整体说明与信息缺口",
-  "confidence": "low|medium|high"
+  ]
 }
 ```
+
+不要输出 confidence、overall_note 或任何计数字段 —— 可信度与来源计数由系统确定性计算。
 
 主题可选值：assessment_pressure / salary_fulfillment / startup_funding_fulfillment / administrative_burden / teaching_load / young_faculty_turnover / promotion_environment / department_management / research_collaboration / student_resources / other

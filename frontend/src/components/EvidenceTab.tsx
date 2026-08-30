@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, createJobEvidence, deleteEvidence, listEvidence } from "../services/api";
+import { api, createJobEvidence, createOrgEvidence, deleteEvidence, listEvidence } from "../services/api";
 import type { Evidence, EvidenceCreateInput } from "../types";
 import {
   Badge,
@@ -34,7 +34,13 @@ const STANCE_TONES: Record<string, "green" | "red" | "amber" | "zinc"> = {
   unknown: "zinc",
 };
 
-export default function EvidenceTab({ jobId }: { jobId: number }) {
+export default function EvidenceTab({
+  jobId,
+  organizationId,
+}: {
+  jobId: number;
+  organizationId: number | null;
+}) {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -59,18 +65,26 @@ export default function EvidenceTab({ jobId }: { jobId: number }) {
   const { data: orgRows, isLoading: orgLoading, isError: orgError } = useQuery({
     queryKey: ["evidence", "org", jobId],
     queryFn: async () => {
-      const job = await api<import("../types").JobDetail>(`/jobs/${jobId}`);
-      if (!job.organization) return [];
-      return listEvidence({ organization_id: job.organization.id });
+      const jobDetail = await api<import("../types").JobDetail>(`/jobs/${jobId}`);
+      return jobDetail.organization ? listEvidence({ organization_id: jobDetail.organization.id }) : [];
     },
   });
   const orgLevelRows = (orgRows ?? []).filter((e) => e.job_id === null);
   const jobRowsList = jobRows ?? [];
 
   const createMutation = useMutation({
-    mutationFn: (payload: EvidenceCreateInput) => createJobEvidence(jobId, payload),
+    // Phase 6.1 P0-5：挂载层级与 scope 分离 —— 学校/院系/课题组/未知证据挂到单位
+    //（job_id=null，才能进入 Reputation 统计），只有明确"岗位"scope 挂到岗位
+    mutationFn: (payload: EvidenceCreateInput) => {
+      const attachToOrg = form.scope_level !== "job";
+      return attachToOrg
+        ? createOrgEvidence(organizationId!, payload)
+        : createJobEvidence(jobId, payload);
+    },
+    onError: (err) => window.alert(`证据保存失败：${err.message}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["evidence", "job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["evidence"] });
+      queryClient.invalidateQueries({ queryKey: ["reputation"] });
       setShowForm(false);
       setForm((f) => ({ ...f, claim: "", raw_excerpt: "" }));
     },
@@ -78,7 +92,11 @@ export default function EvidenceTab({ jobId }: { jobId: number }) {
 
   const removeMutation = useMutation({
     mutationFn: (id: number) => deleteEvidence(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["evidence", "job", jobId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["evidence"] });
+      queryClient.invalidateQueries({ queryKey: ["reputation"] });
+    },
+    onError: (err) => window.alert(err.message),  // 已参与评估 → 409 透明提示
   });
 
   const bind = (key: keyof typeof form) => ({
@@ -164,7 +182,14 @@ export default function EvidenceTab({ jobId }: { jobId: number }) {
               <div className="col-span-2 flex justify-end">
                 <Button
                   size="sm"
-                  onClick={() => createMutation.mutate(form)}
+                  onClick={() => {
+                    // 空字符串 → null：date/文本字段不应把 "" 发给后端
+                    const payload: Record<string, unknown> = { ...form };
+                    for (const [k, v] of Object.entries(payload)) {
+                      if (v === "") payload[k] = null;
+                    }
+                    createMutation.mutate(payload as unknown as EvidenceCreateInput);
+                  }}
                   disabled={createMutation.isPending || form.claim.trim() === ""}
                 >
                   保存证据

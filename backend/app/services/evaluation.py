@@ -32,6 +32,7 @@ from app.models import Evidence, Job, JobEvaluation  # noqa: F401
 from app.models.evaluation_evidence import EvaluationEvidence
 from app.services.hard_filters import check_hard_filters
 from app.services.regions import get_region_score, get_region_tier
+from app.services.reputation import eligible_reputation_evidence_ids
 from app.services.scoring import compute_coverage, compute_total, recommend_level
 
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -160,7 +161,11 @@ def _job_context_dict(job: Job) -> dict:
 
 
 def build_evaluation_context(db: Session, job: Job, profile: dict | None = None) -> dict:
-    """构造真实 AI 输入。返回的 dict 同时作为 user message 与 input_snapshot。"""
+    """构造真实 AI 输入。返回的 dict 同时作为 user message 与 input_snapshot。
+
+    Phase 6.1：每条证据的 `eligible_for_reputation_scoring` 由 reputation.py 的
+    唯一权威 `eligible_reputation_evidence_ids()` 判定（基于主题聚合的
+    eligibility），Reputation 页与 Evaluation 使用同一套规则。"""
     profile_cfg = profile if profile is not None else get_profile_config()
 
     # 候选集放宽到岗位 + 单位，scope 分层在 Python 里精确过滤（Phase 4.1）；
@@ -180,6 +185,13 @@ def build_evaluation_context(db: Session, job: Job, profile: dict | None = None)
         candidates = db.scalars(
             select(Evidence).where(Evidence.job_id == job.id).order_by(Evidence.id)
         ).all()
+    # Eligibility 唯一权威（Phase 6.1）：单位主题聚合后 eligible 的证据 id 集合
+    eligible_ids = (
+        eligible_reputation_evidence_ids(db, job.organization_id, job.department)
+        if job.organization_id is not None
+        else set()
+    )
+
     evidence_list = [
         {
             "id": ev.id,
@@ -194,9 +206,9 @@ def build_evaluation_context(db: Session, job: Job, profile: dict | None = None)
             "source_type": ev.source_type,
             "source_author": ev.source_author,
             "published_at": str(ev.published_at) if ev.published_at else None,
-            # Phase 6：unknown scope 不自动升级为"全校通用证据"——仍提供给模型
-            # 作参考，但明确标记不可支撑 reputation 定量分（finalize 强制）
-            "eligible_for_reputation_scoring": ev.scope_level != "unknown",
+            # Phase 6.1：标志来自唯一权威（主题聚合 eligibility），
+            # 单 C/单源/纯 C-D/岗位级事实都不能解锁 reputation 定量分
+            "eligible_for_reputation_scoring": ev.id in eligible_ids,
         }
         for ev in candidates
         if evidence_in_scope(job, ev)
@@ -334,11 +346,12 @@ def finalize_evaluation(
     # Region 与 reputation 的最终值由 snapshot 决定，调用方传入的值一律覆盖
     final_scores = dict(dimension_scores)
     final_scores["region"] = (input_snapshot.get("region") or {}).get("score")
-    # Phase 6 reputation guard：没有任何"够格支撑评分"的证据（eligible 标志，
-    # 如 unknown scope 线索）时，reputation 强制为 null —— 旧快照无标志按 True 兼容
+    # Phase 6.1 reputation guard：没有任何"够格支撑评分"的证据时，
+    # reputation 强制为 null。新快照缺少标志按 False（保守：不默认解锁）；
+    # 仅 Phase 6 之前的历史快照（无任何标志）显式兼容由读取路径处理，不经过本函数。
     evidence_snapshot = input_snapshot.get("evidence") or []
     reputation_eligible = any(
-        bool(item.get("eligible_for_reputation_scoring", True))
+        bool(item.get("eligible_for_reputation_scoring", False))
         for item in evidence_snapshot
         if isinstance(item, dict)
     )

@@ -125,12 +125,15 @@ export async function deleteEvidence(evidenceId: number) {
   return api<void>(`/evidence/${evidenceId}`, { method: "DELETE" });
 }
 
-export async function getReputationReport(orgId: number) {
-  return api<import("../types").ReputationReport>(`/organizations/${orgId}/reputation`);
+export async function getReputationReport(orgId: number, department?: string | null) {
+  return api<import("../types").ReputationReport>(
+    `/organizations/${orgId}/reputation${buildQuery({ department })}`,
+  );
 }
 
-export async function synthesizeReputation(orgId: number) {
-  return api<import("../types").ReputationReport>(`/organizations/${orgId}/reputation/synthesize`, {
-    method: "POST",
-  });
+export async function synthesizeReputation(orgId: number, department?: string | null) {
+  return api<import("../types").ReputationReport>(
+    `/organizations/${orgId}/reputation/synthesize${buildQuery({ department })}`,
+    { method: "POST" },
+  );
 }

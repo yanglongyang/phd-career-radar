@@ -63,21 +63,29 @@ function TopicCard({ stat }: { stat: ReputationTopicStat }) {
   );
 }
 
-export default function ReputationTab({ organizationId }: { organizationId: number | null }) {
+export default function ReputationTab({
+  organizationId,
+  department,
+}: {
+  organizationId: number | null;
+  department: string | null;
+}) {
   const queryClient = useQueryClient();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const reportQuery = useQuery({
-    queryKey: ["reputation", organizationId],
-    queryFn: () => getReputationReport(organizationId!),
+    queryKey: ["reputation", organizationId, department],
+    queryFn: () => getReputationReport(organizationId!, department),
     enabled: organizationId != null,
   });
 
   const synthesizeMutation = useMutation({
-    mutationFn: () => synthesizeReputation(organizationId!),
-    onSuccess: () => {
+    mutationFn: () => synthesizeReputation(organizationId!, department),
+    // 用 POST 返回的报告直接写缓存 —— AI 结论立即留在页面，
+    // 不被随后的确定性 GET 覆盖（Phase 6.1）
+    onSuccess: (report) => {
       setErrorMsg(null);
-      queryClient.invalidateQueries({ queryKey: ["reputation", organizationId] });
+      queryClient.setQueryData(["reputation", organizationId, department], report);
     },
     onError: (err) => setErrorMsg(err.message),
   });

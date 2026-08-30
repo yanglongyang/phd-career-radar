@@ -482,10 +482,10 @@ export default function JobDetailPage() {
         )}
 
         {tab === "reputation" && (
-          <ReputationTab organizationId={job.organization?.id ?? null} />
+          <ReputationTab organizationId={job.organization?.id ?? null} department={job.department} />
         )}
 
-        {tab === "evidence" && <EvidenceTab jobId={job.id} />}
+        {tab === "evidence" && <EvidenceTab jobId={job.id} organizationId={job.organization?.id ?? null} />}
 
         {tab === "application" && (
           applicationQuery.isLoading ? (

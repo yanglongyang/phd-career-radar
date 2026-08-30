@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EvidenceLevelLiteral = Literal["A", "B", "C", "D"]
 StanceLiteral = Literal["positive", "negative", "mixed", "neutral", "unknown"]
@@ -25,6 +25,10 @@ EVIDENCE_CATEGORIES = [
 
 
 class EvidenceCreate(BaseModel):
+    """创建证据。extra=forbid + NOT NULL 字段显式 null → 422（全项目显式失败契约）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
     claim: str = Field(min_length=1)
     category: str = "other"
     source_type: str | None = None
@@ -45,7 +49,12 @@ class EvidenceCreate(BaseModel):
 
 
 class EvidenceUpdate(BaseModel):
-    """部分更新：全字段可选；省略 = 不修改。"""
+    """部分更新：省略 = 不修改；显式 null 只允许用于可空字段。
+
+    claim/category/stance/scope_level/evidence_level 是 NOT NULL 列，
+    显式置空 → 422（而不是 IntegrityError/500）。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     claim: str | None = Field(default=None, min_length=1)
     category: str | None = None
@@ -63,6 +72,15 @@ class EvidenceUpdate(BaseModel):
     published_at: date | None = None
     confidence: Literal["low", "medium", "high"] | None = None
     raw_excerpt: str | None = None
+
+    _NON_NULLABLE = ("claim", "category", "stance", "scope_level", "evidence_level")
+
+    @model_validator(mode="after")
+    def _not_nullable_fields_not_explicit_null(self) -> "EvidenceUpdate":
+        for key in self._NON_NULLABLE:
+            if key in self.model_fields_set and getattr(self, key) is None:
+                raise ValueError(f"{key} 不允许显式置空；请省略该字段或提供合法值")
+        return self
 
 
 class EvidenceOut(BaseModel):

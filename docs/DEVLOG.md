@@ -555,3 +555,63 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 - **Phase 7 设置页可视化、批量重评、Collector 架构、历史时间线等收尾项未实现**。
 - Evidence selection/ranking（大量证据时的挑选策略）留 Phase 7/优化阶段——当前按 id 排序全量纳入。
 - unknown scope 的语义（本阶段：线索）如需进一步细分（例如允许用户手动提升）留待真实使用反馈。
+
+---
+
+## Phase 6.1 — Reputation Integrity Fixes（2026-08-31 完成）
+
+依据第九轮审查执行。核心目标一句话：**一个主题在 Reputation 页被判定"不可定量"，则无论通过什么路径，都不能进入 reputation_score。** 无 migration，不触碰 Phase 2-5 模型。
+
+### P0 修复
+
+1. **eligibility 唯一权威（P0-1）**：新增 `eligible_reputation_evidence_ids(db, org, dept)` ——
+   从真正的主题聚合结果取 eligible 主题的 evidence_ids 并集。Evaluation context 的
+   `eligible_for_reputation_scoring` 改为 `ev.id in eligible_ids`（此前是复制版规则
+   `scope_level != "unknown"`，导致"知乎单帖 org 级 C"在 Reputation 页不可定量、
+   却能在 Evaluation 解锁 reputation 分的矛盾）。finalize 对新 snapshot 缺标志默认 False。
+   回归测试四件套：单 C → null；双独立 C → null；B+C 双独立源 → eligible 保留；
+   job 级 A 事实 → null（官方"聘期六年"不能解锁"风评 70 分"）。
+2. **院系不串证据（P0-2）**：`collect_evidence` 语义修正——department=None 只统计
+   organization scope（院系级证据全部降为线索"未指定院系"）；department=X 只合并匹配院系。
+   前端 ReputationTab 传 `department={job.department}`，GET/synthesize/query key 均含
+   department。测试：化学学院岗位的医学院证据永不进入统计/评估。
+3. **已参与评估的 Evidence 禁止删除（P0-3）**：DELETE 前检查 EvaluationEvidence——
+   被引用 → 409"评估审计链必须保留"；未引用 → 204。**撤销了 Phase 6 初版的
+   "删除时清理关联"逻辑**（那会破坏 Phase 4 冻结不变量"input_snapshot = links"）。
+   Evidence 编辑仍允许（历史文字已冻结在 input_snapshot）。
+4. **repost canonical 跨主题追根（P0-4）**：`canonical_source_keys()` 基于单位**全量**
+   证据做追根，不再限于当前主题子集——"原帖 category=other 不在统计子集"时，其两个
+   转载不会再被误拆成 2 个独立来源（测试：independent=1）。新增创建/更新校验：
+   转载目标不存在/自身/循环/跨单位 → 422（RepostChainError）。
+5. **Evidence 表单按 scope 真正挂载（P0-5）**：学校/院系/课题组/未知 →
+   `createOrgEvidence`（job_id=null，进入 Reputation 统计）；岗位 → `createJobEvidence`。
+   修复"表单选学校但实际挂岗位、永远进不了统计"的错位。另修复空字符串发给
+   date 字段导致的 422（提交前空串转 null）+ 创建失败 alert 透明提示。
+
+### P1 修复
+
+6. **AI 综合删除 confidence/overall_note**：ReputationSynthesisOut 只剩 topics
+   （topic+conclusion）——overall_confidence 由确定性规则（任一 eligible 主题 → medium，
+   否则 low）唯一决定，AI 无法把 low 拔高成 high。Schema/Prompt 同步。
+7. **synthesize 结果保留在页面**：onSuccess 用 `setQueryData` 写入 POST 返回的报告，
+   不再用确定性 GET 覆盖——AI 结论立即显示且不丢失。
+8. **Evidence Schema `extra="forbid"` + NOT NULL 字段显式 null → 422**（与 Phase 5.1
+   status:null 同一契约）；岗位证据 organization 强制继承，不能伪造归属（测试：
+   organization_id=999 被忽略）。
+9. **invalidate 完整性**：证据创建/删除后失效 evidence + reputation 全部相关查询。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**154 passed**（重写 reputation 测试套件：CRUD/repost 校验/统计语义/eligibility
+  唯一权威四件套/删除保护/department 语义/AI 合并/503）
+- vitest：17 passed；ruff：All checks passed；前端 build：通过
+- 浏览器验证：学校级表单创建（job_id=null）→ 进入 reputation 统计；AI 综合按钮 503 透明报错。
+
+### 明确未实现
+
+- **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
+  申请历史时间线、applied_at 显式编辑。

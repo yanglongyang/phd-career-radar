@@ -79,13 +79,18 @@ def test_reputation_synthesis_strict_schema():
         {
             "topics": [
                 {"topic": "assessment_pressure", "conclusion": "统计显示考核压力反馈较多。"}
-            ],
-            "overall_note": "",
-            "confidence": "medium",
+            ]
         }
     )
     assert synthesis.topics[0].topic == "assessment_pressure"
     assert not hasattr(synthesis.topics[0], "independent_sources")
+    # Phase 6.1：AI 不得输出 confidence/overall_note —— 置信度由确定性规则唯一决定
+    assert not hasattr(synthesis, "confidence")
+    assert not hasattr(synthesis, "overall_note")
+    with pytest.raises(ValidationError):
+        ReputationSynthesisOut.model_validate(
+            {"topics": [], "confidence": "high"}
+        )
     # 非法主题拒绝
     with pytest.raises(ValidationError):
         ReputationSynthesisOut.model_validate(
