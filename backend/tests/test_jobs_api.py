@@ -4,7 +4,9 @@ from tests.conftest import JOB_PAYLOAD
 def test_create_job_with_organization_autocreate(client, sample_job):
     assert sample_job["title"] == JOB_PAYLOAD["title"]
     assert sample_job["organization"]["name"] == "示例大学"
-    assert sample_job["position_nature"] == "tenure_track"
+    # Phase 2.1.1：position_nature 退休为只读 legacy 字段，新写入一律 unknown
+    # （JOB_PAYLOAD 里的 position_nature 值被 schema 忽略）
+    assert sample_job["position_nature"] == "unknown"
     assert sample_job["status"] == "new"
 
 
@@ -95,7 +97,7 @@ def test_dashboard_counts_split_job_and_application(client, sample_job, db_sessi
     client.patch(f"/api/jobs/{sample_job['id']}", json={"status": "shortlisted"})
 
     # 每个岗位一条申请记录（Application.job_id 唯一；Application API 属于 Phase 5）
-    for suffix, status in (("A", "applied"), ("B", "interview_1"), ("C", "offer")):
+    for suffix, status in (("A", "applied"), ("B", "interview_1"), ("C", "offer"), ("D", "hr")):
         resp = client.post(
             "/api/jobs",
             json={**JOB_PAYLOAD, "title": f"岗位{suffix}", "city": "苏州",
@@ -106,10 +108,10 @@ def test_dashboard_counts_split_job_and_application(client, sample_job, db_sessi
     db_session.commit()
 
     data = client.get("/api/dashboard").json()
-    assert data["counts"]["new_today"] == 4  # 今日新增与状态无关（1 + 新建 3 个）
+    assert data["counts"]["new_today"] == 5  # 今日新增与状态无关（1 + 新建 4 个）
     assert data["counts"]["focus"] == 1      # shortlisted 来自 Job
-    assert data["counts"]["to_review"] == 3  # 新建的 3 个岗位仍是 new
+    assert data["counts"]["to_review"] == 4  # 新建的 4 个岗位仍是 new
     assert data["counts"]["applied"] == 1        # 来自 Application
-    assert data["counts"]["interviewing"] == 1   # interview_1 计入面试中
+    assert data["counts"]["interviewing"] == 2   # interview_1 与 hr 都计入面试中（Phase 2.1.1 口径）
     assert data["counts"]["offer"] == 1          # 来自 Application
     assert data["counts"]["preparing"] == 0

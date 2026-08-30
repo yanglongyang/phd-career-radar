@@ -16,10 +16,6 @@ JobCategoryLiteral = Literal[
     "industry_rnd",
     "other",
 ]
-PositionNatureLiteral = Literal[
-    "permanent", "tenure", "tenure_track", "pre_tenure",
-    "fixed_term", "postdoc", "pi_funded", "unknown",
-]
 # legacy 字段：仅信息筛选状态；求职流程状态（preparing/applied/...）由 Application 负责
 JobDispositionLiteral = Literal["new", "reviewing", "shortlisted", "ignored", "closed"]
 SalaryCurrencyLiteral = Literal["CNY", "USD", "EUR", "GBP", "unknown"]
@@ -56,7 +52,6 @@ class JobCreate(BaseModel):
     deadline: date | None = None
 
     employment_type: str | None = None
-    position_nature: PositionNatureLiteral = "unknown"  # legacy 派生展示字段
 
     salary_text: str | None = None
     salary_min: float | None = None   # legacy / compatibility
@@ -102,7 +97,6 @@ class JobUpdate(BaseModel):
     deadline: date | None = None
 
     employment_type: str | None = None
-    position_nature: PositionNatureLiteral | None = None  # legacy 派生展示字段
 
     salary_text: str | None = None
     salary_min: float | None = None   # legacy / compatibility

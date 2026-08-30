@@ -5,6 +5,11 @@
 minimum_salary 的口径为 CNY 万元/年：仅当岗位具备 guaranteed_salary_max
 且 salary_currency=CNY、salary_period=year 时才可比较；
 广告口径总包（advertised/legacy salary_max）含绩效，不用于硬性过滤。
+
+Phase 2.1.1：legacy position_nature 不再参与任何过滤判断 ——
+PI 经费判定只看 AcademicJobDetails.funding_source；
+reject_high_risk_tenure_track 在评估时具备完整条件后真正执行
+（tenure_status=tenure_track 且有效风险达到 high/critical）。
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from app.core.config import get_profile_config
 from app.core.fingerprint import normalize_text
 
 
-def check_hard_filters(job, profile: dict | None = None) -> list[str]:
+def check_hard_filters(job, profile: dict | None = None, risk_level: str | None = None) -> list[str]:
     profile = profile if profile is not None else get_profile_config()
     hf = profile.get("hard_filters") or {}
     triggered: list[str] = []
@@ -28,15 +33,25 @@ def check_hard_filters(job, profile: dict | None = None) -> list[str]:
     triggered.extend(_salary_filter_hits(job, hf))
 
     details = getattr(job, "academic_details", None)
-    funding_is_pi = details is not None and details.funding_source == "pi"
-    if hf.get("reject_pi_funded") and (job.position_nature == "pi_funded" or funding_is_pi):
+
+    if hf.get("reject_pi_funded") and details is not None and details.funding_source == "pi":
         triggered.append("reject_pi_funded")
 
-    if hf.get("reject_postdoc") and (job.job_category == "postdoc" or job.position_nature == "postdoc"):
+    if hf.get("reject_postdoc") and job.job_category == "postdoc":
         triggered.append("reject_postdoc")
 
-    # reject_high_risk_tenure_track 依赖 AI 风险评估结果，在 Phase 4 评估流程中判定
+    if hf.get("reject_high_risk_tenure_track") and _is_high_risk_tenure_track(details, risk_level):
+        triggered.append("reject_high_risk_tenure_track")
+
     return triggered
+
+
+def _is_high_risk_tenure_track(details, risk_level: str | None) -> bool:
+    return (
+        risk_level in ("high", "critical")
+        and details is not None
+        and details.tenure_status == "tenure_track"
+    )
 
 
 def _salary_filter_hits(job, hf: dict) -> list[str]:

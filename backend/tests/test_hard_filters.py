@@ -61,21 +61,39 @@ def test_salary_filter_ok_when_guaranteed_above_minimum():
     assert check_hard_filters(job, profile) == []
 
 
-def test_reject_pi_funded_via_position_nature():
+def test_reject_pi_funded_via_funding_source_only():
+    """Phase 2.1.1：legacy position_nature 不再参与判断，只看正交的 funding_source。"""
     profile = {"hard_filters": {"reject_pi_funded": True}}
-    assert check_hard_filters(make_job(position_nature="pi_funded"), profile) == ["reject_pi_funded"]
-    assert check_hard_filters(make_job(position_nature="tenure_track"), profile) == []
+    assert check_hard_filters(
+        make_job(academic_details=SimpleNamespace(funding_source="pi")), profile
+    ) == ["reject_pi_funded"]
+    assert check_hard_filters(make_job(), profile) == []
+    # legacy 字段即使残留 pi_funded 旧值也不再触发
+    assert check_hard_filters(
+        make_job(position_nature="pi_funded"), profile
+    ) == []
 
 
-def test_reject_pi_funded_via_funding_source():
-    """AcademicJobDetails.funding_source = pi 也触发（正交维度）。"""
-    profile = {"hard_filters": {"reject_pi_funded": True}}
-    details = SimpleNamespace(funding_source="pi")
-    assert check_hard_filters(make_job(academic_details=details), profile) == ["reject_pi_funded"]
-
-
-def test_reject_postdoc():
+def test_reject_postdoc_only_by_category():
     profile = {"hard_filters": {"reject_postdoc": True}}
     assert check_hard_filters(make_job(job_category="postdoc"), profile) == ["reject_postdoc"]
-    assert check_hard_filters(make_job(position_nature="postdoc"), profile) == ["reject_postdoc"]
-    assert check_hard_filters(make_job(position_nature="tenure_track"), profile) == []
+    assert check_hard_filters(make_job(job_category="university_faculty"), profile) == []
+
+
+def test_reject_high_risk_tenure_track_executes():
+    """Phase 2.1.1：该开关不再是死配置 —— 评估时具备 tenure 状态与有效风险后真正生效。"""
+    profile = {"hard_filters": {"reject_high_risk_tenure_track": True}}
+    track = SimpleNamespace(tenure_status="tenure_track")
+    tenured = SimpleNamespace(tenure_status="tenured")
+
+    assert check_hard_filters(
+        make_job(academic_details=track), profile, risk_level="high"
+    ) == ["reject_high_risk_tenure_track"]
+    assert check_hard_filters(
+        make_job(academic_details=track), profile, risk_level="critical"
+    ) == ["reject_high_risk_tenure_track"]
+    # 风险不足、非预聘、未填详情、开关关闭 → 都不触发
+    assert check_hard_filters(make_job(academic_details=track), profile, risk_level="medium") == []
+    assert check_hard_filters(make_job(academic_details=tenured), profile, risk_level="high") == []
+    assert check_hard_filters(make_job(), profile, risk_level="high") == []
+    assert check_hard_filters(make_job(academic_details=track), {"hard_filters": {}}, risk_level="high") == []

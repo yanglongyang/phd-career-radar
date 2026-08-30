@@ -4,14 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, api } from "../services/api";
 import type { JobCreateInput, JobDetail } from "../types";
 import { Button, Card, CardContent, Field, Input, PageHeader, Select, Textarea } from "../components/ui";
-import { JOB_CATEGORY_LABELS, POSITION_NATURE_LABELS } from "../lib/utils";
+import { JOB_CATEGORY_LABELS } from "../lib/utils";
 
 type FormState = {
   title: string;
   organization_name: string;
   department: string;
   job_category: string;
-  position_nature: string;
   employment_type: string;
   province: string;
   city: string;
@@ -30,7 +29,6 @@ const EMPTY_FORM: FormState = {
   organization_name: "",
   department: "",
   job_category: "other",
-  position_nature: "unknown",
   employment_type: "",
   province: "",
   city: "",
@@ -52,7 +50,6 @@ function toPayload(form: FormState, allowDuplicate: boolean): JobCreateInput {
     organization_name: str(form.organization_name),
     department: str(form.department),
     job_category: form.job_category,
-    position_nature: form.position_nature,
     employment_type: str(form.employment_type),
     province: str(form.province),
     city: str(form.city),
@@ -149,13 +146,6 @@ export default function JobNewPage() {
           <Field label="岗位类别">
             <Select {...bind("job_category")}>
               {Object.entries(JOB_CATEGORY_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="岗位性质（公告未说明则保持未知）">
-            <Select {...bind("position_nature")}>
-              {Object.entries(POSITION_NATURE_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </Select>

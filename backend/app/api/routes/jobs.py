@@ -218,7 +218,11 @@ def get_academic_details(job_id: int, db: Session = Depends(get_db)):
 def update_academic_details(
     job_id: int, payload: AcademicJobDetailsUpdate, db: Session = Depends(get_db)
 ):
-    """Upsert：不存在则创建。部分更新，显式传 null 表示"未知/待确认"。"""
+    """Upsert：不存在则创建。部分更新。
+
+    Phase 2.1.1：四轴（establishment/tenure/contract/funding）显式传 null
+    归一化为 "unknown" —— 数据库列 NOT NULL，不存在第二套 null 未知。
+    """
     try:
         job = job_service.get_job_or_404(db, job_id)
     except LookupError as e:
@@ -228,7 +232,11 @@ def update_academic_details(
         details = AcademicJobDetails(job_id=job.id)
         job.academic_details = details
         db.add(details)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    for axis in ("establishment_status", "tenure_status", "contract_type", "funding_source"):
+        if axis in payload.model_fields_set and data[axis] is None:
+            data[axis] = "unknown"
+    for field, value in data.items():
         setattr(details, field, value)
     db.commit()
     db.refresh(details)

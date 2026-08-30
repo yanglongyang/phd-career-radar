@@ -110,7 +110,6 @@ def create_job(db: Session, payload: JobCreate) -> tuple[Job, Job | None]:
         posted_at=payload.posted_at,
         deadline=payload.deadline,
         employment_type=payload.employment_type,
-        position_nature=payload.position_nature,
         salary_text=payload.salary_text,
         salary_min=payload.salary_min,
         salary_max=payload.salary_max,

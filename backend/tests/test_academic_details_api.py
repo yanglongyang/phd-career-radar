@@ -50,6 +50,20 @@ def test_partial_update_academic_details(client, sample_job):
     assert resp.json()["contract_years"] is None
 
 
+def test_axis_null_coerced_to_unknown(client, sample_job):
+    """Phase 2.1.1 P0-1：四轴显式 null 归一化为 "unknown"，不写数据库 NULL。"""
+    url = f"/api/jobs/{sample_job['id']}/academic-details"
+    resp = client.patch(url, json={"tenure_status": "tenure_track"})
+    assert resp.json()["tenure_status"] == "tenure_track"
+    # 显式 null → unknown（不是 None）
+    resp = client.patch(url, json={"tenure_status": None, "funding_source": None})
+    data = resp.json()
+    assert data["tenure_status"] == "unknown"
+    assert data["funding_source"] == "unknown"
+    # 未提供的轴保持不变
+    assert data["establishment_status"] == "unknown"
+
+
 def test_academic_details_invalid_value_rejected(client, sample_job):
     resp = client.patch(
         f"/api/jobs/{sample_job['id']}/academic-details",

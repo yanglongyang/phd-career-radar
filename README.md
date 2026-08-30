@@ -128,6 +128,7 @@ python -m alembic downgrade -1     # 回退一步
 | 1 | 基础设施：仓库、后端、前端、数据库、迁移、基础 UI | ✅ 完成 |
 | 2 | Job/Organization CRUD、岗位列表/详情、手工导入、去重、版本监控、Dashboard API | ✅ 完成 |
 | 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |
+| 2.1.1 | Consistency fixes：四轴 null→unknown 归一、Risk 证据引用强一致（⊆ 本次评估 ⊆ 真实存在）、effective_risk 由后端派生、reject_high_risk_tenure_track 真正执行、position_nature 完全退休、input_snapshot 强制 | ✅ 完成 |
 | 3 | AI 结构化提取（粘贴 JD → 结构化岗位 → 用户确认 → 保存） | ⬜ 未实现 |
 | 4 | AI 评估（Profile + Job + Evidence → 结构化评估、风险、可信度；推荐等级由后端规则引擎计算） | ⬜ 未实现（Provider/Schema/规则引擎已就绪） |
 | 5 | Career CRM（Shortlist、申请状态 Kanban、next action） | ⬜ 未实现（数据模型已建） |

@@ -21,8 +21,8 @@ from app.schemas.job import JobListItem
 from app.schemas.organization import OrganizationBrief
 from app.services.jobs import latest_evaluations_subquery, top_jobs
 
-# Application 状态 → Dashboard"面试中"统计口径
-INTERVIEWING_STATUSES = ("written_test", "interview_1", "interview_2")
+# Application 状态 → Dashboard"面试中"统计口径（含 HR 沟通阶段，Phase 2.1.1）
+INTERVIEWING_STATUSES = ("written_test", "interview_1", "interview_2", "hr")
 
 
 def build_dashboard(db: Session) -> DashboardOut:

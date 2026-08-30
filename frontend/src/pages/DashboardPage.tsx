@@ -84,7 +84,22 @@ export default function DashboardPage() {
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {data.top_jobs.map((job) => (
                   <tr key={job.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                    <td className="px-4 py-2.5 font-semibold tabular-nums">{job.evaluation?.total_score ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="font-semibold tabular-nums">{job.evaluation?.total_score ?? "—"}</div>
+                      {job.evaluation?.score_coverage != null && (
+                        <div
+                          className={
+                            job.evaluation.score_coverage < 40
+                              ? "text-xs font-medium text-amber-600 dark:text-amber-400"
+                              : "text-xs text-zinc-400"
+                          }
+                          title="评分覆盖度：已评分维度的权重占比"
+                        >
+                          覆盖 {job.evaluation.score_coverage}%
+                          {job.evaluation.score_coverage < 40 ? " ⚠" : ""}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
                       <Badge tone={recommendationTone(job.evaluation?.recommendation_level ?? null)}>
                         {job.evaluation?.recommendation_level ?? "—"}

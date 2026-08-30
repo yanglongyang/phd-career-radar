@@ -19,9 +19,9 @@ export const JOB_CATEGORY_LABELS: Record<string, string> = {
 };
 
 export const POSITION_NATURE_LABELS: Record<string, string> = {
-  permanent: "事业编/长聘",
-  tenure: "长聘",
-  tenure_track: "预聘（非升即走）",
+  permanent: "事业编/长聘（legacy）",
+  tenure: "长聘（legacy）",
+  tenure_track: "预聘 / Tenure-track",
   pre_tenure: "预聘期内",
   fixed_term: "合同制",
   postdoc: "博士后",
@@ -46,7 +46,7 @@ export const ESTABLISHMENT_LABELS: Record<string, string> = {
 
 export const TENURE_LABELS: Record<string, string> = {
   tenured: "长聘",
-  tenure_track: "预聘（非升即走）",
+  tenure_track: "预聘 / Tenure-track",
   non_tenure: "非长聘",
   unknown: "未知 / 待确认",
 };

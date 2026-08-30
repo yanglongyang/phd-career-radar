@@ -54,18 +54,19 @@ class JobExtractionOut(BaseModel):
     experience_requirement: str | None = None
 
     # 高校岗位专用字段 —— 缺失一律 null，与 AcademicJobDetails 对齐
+    # 四轴只有一套"未知"表示：字符串 "unknown"（Phase 2.1.1 去除 null 语义）
     establishment_status: Literal[
         "established", "non_established", "unknown"
-    ] | None = None                 # 是否事业编
+    ] = "unknown"                 # 是否事业编
     tenure_status: Literal[
         "tenured", "tenure_track", "non_tenure", "unknown"
-    ] | None = None                 # 长聘体系
+    ] = "unknown"                 # 长聘体系
     contract_type: Literal[
         "open_ended", "fixed_term", "unknown"
-    ] | None = None                 # 合同期限类型
+    ] = "unknown"                 # 合同期限类型
     funding_source: Literal[
         "university", "department", "pi", "external", "mixed", "unknown"
-    ] | None = None                 # 经费来源
+    ] = "unknown"                 # 经费来源
     is_up_or_out: bool | None = None              # 是否非升即走
     contract_years: int | None = None             # 合同年限
     first_contract_period: str | None = None      # 首聘周期

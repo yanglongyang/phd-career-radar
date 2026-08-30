@@ -131,7 +131,7 @@ export default function JobDetailPage() {
             <Button
               variant="danger"
               onClick={() => {
-                if (window.confirm(`确定删除岗位「${job.title}」？相关评估、证据与历史版本会一并删除。`)) {
+                if (window.confirm(`确定删除岗位「${job.title}」？评估、申请记录与历史版本会一并删除；风评证据会保留（与岗位解绑）。`)) {
                   deleteMutation.mutate();
                 }
               }}
