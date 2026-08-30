@@ -135,15 +135,17 @@ class JobEvaluationOut(BaseModel):
     """
 
     summary: str = ""
-    scores: EvaluationScores = Field(default_factory=EvaluationScores)
-    risk_level: Literal["low", "medium", "high", "critical"] = "medium"
+    # Phase 4.1：risk_level / confidence / scores 必填 —— 模型漏字段触发重试，
+    # 而不是被 Pydantic 静默补成 medium（"没输出风险" != "明确判断中风险"）
+    scores: EvaluationScores
+    risk_level: Literal["low", "medium", "high", "critical"]
     risk_items: list[RiskItem] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)  # legacy 文本，兼容保留
     unknowns: list[str] = Field(default_factory=list)
     questions_to_ask: list[str] = Field(default_factory=list)
-    confidence: Literal["low", "medium", "high"] = "medium"
+    confidence: Literal["low", "medium", "high"]
 
     model_config = ConfigDict(extra="forbid")
 

@@ -7,6 +7,7 @@ from app.ai.schemas import JobEvaluationOut as AIEvalOut
 from app.core.hash import stable_json_hash
 from app.models import Evidence, Job, JobEvaluation
 from app.services.evaluation import (
+    build_evaluation_context,
     compute_effective_risk,
     evaluate_job,
     finalize_evaluation,
@@ -21,7 +22,9 @@ INPUT_SNAPSHOT = {
 }
 
 
-def _make_ai_output(risk_level="high", item_severity=None, item_evidence_ids=None) -> JobEvaluationOut:
+def _make_ai_output(
+    risk_level="high", item_severity=None, item_evidence_ids=None, scores=None
+) -> JobEvaluationOut:
     risk_items = []
     if item_severity is not None:
         risk_items.append(
@@ -35,7 +38,7 @@ def _make_ai_output(risk_level="high", item_severity=None, item_evidence_ids=Non
     return JobEvaluationOut.model_validate(
         {
             "summary": "岗位与研究方向高度相关，但预聘考核要求需要进一步核实。",
-            "scores": {"fit": 90, "region": 80, "career_stability": None},
+            "scores": scores or {"fit": 90, "region": 80, "career_stability": None},
             "risk_level": risk_level,
             "risk_items": risk_items,
             "strengths": ["研究方向匹配"],
@@ -241,79 +244,83 @@ def test_finalize_rejects_out_of_scope_evidence(client, sample_job, db_session):
         )
 
 
-def test_region_dimension_falls_back_to_baseline(client, sample_job, db_session, monkeypatch):
-    """AI 未给 region 分时，编排层用地区基准分合成（这里 mock 为 preferred 基准 90）。"""
-    monkeypatch.setattr("app.services.evaluation.get_region_score", lambda p, c: 90.0)
+class _RegionProvider(LLMProvider):
+    name = "fake_region"
+    model = "m"
 
-    class _Provider(LLMProvider):
-        name = "fake_region"
-        model = "m"
+    def evaluate_job(self, context: dict):
+        self.context = context
+        # AI 擅自给城市打分 —— 必须被用户配置基准覆盖/忽略
+        return (
+            AIEvalOut.model_validate(
+                {"summary": "", "scores": {"fit": 80, "region": 75},
+                 "risk_level": "medium", "confidence": "medium"}
+            ),
+            "job_evaluation_v1",
+        )
 
-        def evaluate_job(self, context: dict):
-            return (
-                AIEvalOut.model_validate(
-                    {"summary": "", "scores": {"fit": 80, "region": None},
-                     "risk_level": "medium", "confidence": "medium"}
-                ),
-                "job_evaluation_v1",
-            )
+    def extract_job(self, jd_text: str):
+        raise NotImplementedError
 
-        def extract_job(self, jd_text: str):
-            raise NotImplementedError
+    def summarize_reputation(self, evidence: list[dict]):
+        raise NotImplementedError
 
-        def summarize_reputation(self, evidence: list[dict]):
-            raise NotImplementedError
 
-    evaluation = evaluate_job(
-        db_session, db_session.get(Job, sample_job["id"]), _Provider()
-    )
+def test_region_score_from_config_only_ai_cannot_override(client, sample_job, db_session, monkeypatch):
+    """Phase 4.1 P0-4：region 只由用户配置基准决定，AI 给分必须被忽略（unrated → null）。"""
+    provider = _RegionProvider()
+    evaluation = evaluate_job(db_session, db_session.get(Job, sample_job["id"]), provider)
     db_session.commit()
-    assert evaluation.region_score == 90.0
-    # fit(20) + region(15) → coverage 35；(80*20+90*15)/35 = 84.3
-    assert evaluation.total_score == 84.3
+    # context 里基准为 unrated → None（regions.yaml 默认全空）
+    assert provider.context["region"]["score"] is None
+    assert provider.context["region"]["tier"] == "unrated"
+    # 落库的 region_score 也只能是基准（None），不是 AI 的 75
+    assert evaluation.region_score is None
+
+    # 用户配置了基准时（mock preferred 90），AI 的 75 依然被忽略
+    monkeypatch.setattr("app.services.evaluation.get_region_score", lambda p, c: 90.0)
+    db_session.delete(evaluation)
+    evaluation2 = evaluate_job(db_session, db_session.get(Job, sample_job["id"]), provider)
+    db_session.commit()
+    assert evaluation2.region_score == 90.0
+
+
+class _SimpleProvider(LLMProvider):
+    """可配置输出的最小 Provider。"""
+
+    name = "fake_eval"
+    model = "fake-model-4"
+
+    def __init__(self, output: dict | None = None):
+        self.seen_contexts: list[dict] = []
+        self.output = output or {
+            "summary": "岗位匹配度高，但预聘考核需要核实。",
+            "scores": {"fit": 90, "region": None, "career_stability": 70},
+            "risk_level": "medium",
+            "risk_items": [
+                {"type": "up_or_out", "severity": "high",
+                 "reason": "预聘制考核文件缺失", "evidence_ids": []}
+            ],
+            "strengths": ["研究方向匹配"],
+            "unknowns": ["首聘周期"],
+            "questions_to_ask": ["考核未通过如何处理？"],
+            "confidence": "medium",
+        }
+
+    def evaluate_job(self, context: dict):
+        self.seen_contexts.append(context)
+        return AIEvalOut.model_validate(self.output), "job_evaluation_v1"
+
+    def extract_job(self, jd_text: str):
+        raise NotImplementedError
+
+    def summarize_reputation(self, evidence: list[dict]):
+        raise NotImplementedError
 
 
 def test_evaluate_job_full_flow(client, sample_job, db_session):
     """Phase 4 全链路：context 自动构造 → AI → finalize → 落库 → 审计完整。"""
-    from app.ai.provider import LLMProvider
-    from app.ai.schemas import JobEvaluationOut as AIEvalOut
-    from app.services.evaluation import evaluate_job
-
-    class FakeEvalProvider(LLMProvider):
-        name = "fake_eval"
-        model = "fake-model-4"
-
-        def __init__(self):
-            self.seen_contexts = []
-
-        def evaluate_job(self, context: dict):
-            self.seen_contexts.append(context)
-            return (
-                AIEvalOut.model_validate(
-                    {
-                        "summary": "岗位匹配度高，但预聘考核需要核实。",
-                        "scores": {"fit": 90, "region": None, "career_stability": 70},
-                        "risk_level": "medium",
-                        "risk_items": [
-                            {"type": "up_or_out", "severity": "high",
-                             "reason": "预聘制考核文件缺失", "evidence_ids": []}
-                        ],
-                        "strengths": ["研究方向匹配"],
-                        "unknowns": ["首聘周期"],
-                        "questions_to_ask": ["考核未通过如何处理？"],
-                        "confidence": "medium",
-                    }
-                ),
-                "job_evaluation_v1",
-            )
-
-        def extract_job(self, jd_text: str):
-            raise NotImplementedError
-
-        def summarize_reputation(self, evidence: list[dict]):
-            raise NotImplementedError
-
-    provider = FakeEvalProvider()
+    provider = _SimpleProvider()
     job = db_session.get(Job, sample_job["id"])
     evaluation = evaluate_job(db_session, job, provider)
     db_session.commit()
@@ -324,6 +331,9 @@ def test_evaluate_job_full_flow(client, sample_job, db_session):
     for key in ("profile", "job", "region", "evidence", "hard_filters"):
         assert key in ctx
     assert ctx["job"]["title"] == sample_job["title"]
+    # Phase 4.1 P0-1：AI 必须看到单位名与 JD 正文（fit 等维度的核心输入）
+    assert ctx["job"]["organization"]["name"] == sample_job["organization"]["name"]
+    assert ctx["job"]["description_raw"] == sample_job["description_raw"]
     # region 合成：AI null → 系统基准（regions.yaml 全空 → unrated → None）
     assert evaluation.region_score is None
     # fit(20)+career_stability(15) → coverage 35；(90*20+70*15)/35 = 81.4
@@ -377,3 +387,90 @@ def test_evaluation_persists_via_db(client, sample_job, db_session):
     evaluations = client.get(f"/api/jobs/{sample_job['id']}/evaluations").json()
     assert evaluations[0]["score_coverage"] == 20.0
     assert evaluations[0]["recommendation_level"] is not None  # 后端计算，非 AI 输出
+
+
+def test_evidence_scope_layered_filtering(client, sample_job, db_session):
+    """Phase 4.1 P0-2：Evidence 按 job/organization/department/lab 分层过滤。"""
+    org_id = sample_job["organization"]["id"]
+    job_id = sample_job["id"]
+
+    other_job = client.post(
+        "/api/jobs",
+        json={"title": "同校其他岗位", "organization_name": "示例大学",
+              "description_raw": "同校另一个岗位的公告，用于作用域分层测试。"},
+    ).json()
+
+    db_session.add_all(
+        [
+            Evidence(job_id=job_id, organization_id=org_id,
+                     claim="本岗位证据", evidence_level="A", scope_level="job"),
+            Evidence(job_id=other_job["id"], organization_id=org_id,
+                     claim="同校其他岗位证据", evidence_level="C", scope_level="job"),
+            Evidence(organization_id=org_id, claim="学校层面证据",
+                     evidence_level="B", scope_level="organization"),
+            Evidence(organization_id=org_id, claim="未标明作用域",
+                     evidence_level="C", scope_level="unknown"),
+            Evidence(organization_id=org_id, claim="化学学院证据",
+                     evidence_level="B", scope_level="department", scope_name="化学学院"),
+            Evidence(organization_id=org_id, claim="医学院行政重",
+                     evidence_level="C", scope_level="department", scope_name="医学院"),
+            Evidence(organization_id=org_id, claim="某课题组证据",
+                     evidence_level="C", scope_level="lab", scope_name="某课题组"),
+        ]
+    )
+    db_session.commit()
+
+    ctx = build_evaluation_context(db_session, db_session.get(Job, job_id))
+    got = {e["claim"] for e in ctx["evidence"]}
+    assert "本岗位证据" in got                      # job scope → 纳入
+    assert "学校层面证据" in got                    # organization scope → 纳入
+    assert "未标明作用域" in got                    # unknown → 保守纳入
+    assert "化学学院证据" in got                    # department 匹配 → 纳入
+    assert "同校其他岗位证据" not in got            # 其他岗位的 → 排除（job_id 优先）
+    assert "医学院行政重" not in got                # 同校不同院系 → 排除
+    assert "某课题组证据" not in got                # lab 未绑定本岗位 → 排除
+    # context 按 id 排序，snapshot 输入稳定
+    ids = [e["id"] for e in ctx["evidence"]]
+    assert ids == sorted(ids)
+
+
+def test_no_evidence_forces_reputation_null(client, sample_job, db_session):
+    """Phase 4.1 P0-3：无可用 Evidence 时编排层强制 reputation=null，AI 说了不算。"""
+    provider = _SimpleProvider(
+        output={
+            "summary": "尝试给无证据的岗位打风评分。",
+            "scores": {"fit": 90, "reputation": 80},  # AI 违反 Prompt 给了风评分
+            "risk_level": "medium",
+            "confidence": "medium",
+        }
+    )
+    assert provider.output["scores"]["reputation"] == 80
+    evaluation = evaluate_job(db_session, db_session.get(Job, sample_job["id"]), provider)
+    db_session.commit()
+    assert provider.seen_contexts[0]["evidence"] == []  # 确实没有证据
+    assert evaluation.reputation_score is None  # 被强制为 null
+    # reputation 不参与 coverage：(fit 20 + career_stability? 无) → 只有 fit → 20
+    assert evaluation.score_coverage == 20.0
+
+
+def test_audit_evidence_items_frozen_from_snapshot(client, sample_job, db_session):
+    """Phase 4.1：审计展示的 Evidence 内容来自 input_snapshot，不随后续编辑漂移。"""
+    evidence = Evidence(
+        job_id=sample_job["id"], claim="启动经费到账普遍超过一年",
+        evidence_level="C", source_type="forum", scope_level="organization",
+    )
+    db_session.add(evidence)
+    db_session.commit()
+
+    evaluate_job(db_session, db_session.get(Job, sample_job["id"]), _SimpleProvider())
+    db_session.commit()
+
+    # 用户随后修改该 Evidence
+    evidence.claim = "实际到账约 3-6 个月"
+    db_session.commit()
+
+    data = client.get(f"/api/jobs/{sample_job['id']}/evaluations").json()[0]
+    assert len(data["evidence_items"]) == 1
+    item = data["evidence_items"][0]
+    assert item["id"] == evidence.id
+    assert item["claim"] == "启动经费到账普遍超过一年"  # 模型当时看到的旧文本，不是修改后的

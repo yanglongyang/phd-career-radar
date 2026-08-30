@@ -132,7 +132,7 @@ python -m alembic downgrade -1     # 回退一步
 | 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |
 | 2.1.1 | Consistency fixes：四轴 null→unknown 归一、Risk 证据引用强一致（⊆ 本次评估 ⊆ 真实存在）、effective_risk 由后端派生、reject_high_risk_tenure_track 真正执行、position_nature 完全退休、input_snapshot 强制 | ✅ 完成 |
 | 3 | AI 结构化提取：粘贴公告/URL → AI 解析 → 结构化预览（含信息缺口标注）→ 用户逐项确认/修正 → 岗位+高校字段原子入库 | ✅ 完成（Phase 3.1 完整性加固：Preview→Save 字段映射纯函数化并有逐字段测试、provenance 随预览返回、SSRF 边界、大小限制、JobImportRecord 导入审计） |
-| 4 | AI 评估：后端自动构造输入快照（Profile+岗位+地区+Evidence+Hard Filters）→ 同一份内容发给模型并存档 → AI 输出维度分/结构化风险/信息缺口/置信度 → 规则引擎计算总分/覆盖度/推荐等级 → 可审计入库（含 Evidence 关联与配置哈希）；详情页提供"开始/重新评估"与"本次评价依据"审计卡 | ✅ 完成（需配置 AI；AI 未配置时明确 503，评估数据不一致时 409 拒绝保存） |
+| 4 | AI 评估：后端自动构造输入快照（Profile+岗位含 JD 正文+地区+分层 Evidence+Hard Filters）→ 同一份内容发给模型并存档 → AI 输出维度分/结构化风险/信息缺口/置信度 → 规则引擎计算总分/覆盖度/推荐等级 → 可审计入库；地区分只由用户配置决定、无证据强制风评=null、Evidence 按 job/单位/院系/实验室分层过滤（Phase 4.1 完整性加固） | ✅ 完成（需配置 AI；AI 未配置时明确 503，评估数据不一致时 409 拒绝保存） |
 | 5 | Career CRM（Shortlist、申请状态 Kanban、next action） | ⬜ 未实现（数据模型已建） |
 | 6 | Evidence CRUD UI 与风评聚合、可信度呈现 | ⬜ 未实现（数据模型已建） |
 | 7 | 设置页、筛选增强、测试补全、文档完善、Collector 架构 | ⬜ 未实现 |

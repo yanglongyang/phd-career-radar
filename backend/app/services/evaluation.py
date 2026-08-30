@@ -1,11 +1,16 @@
-"""AI 岗位评估编排（Phase 4）。
+"""AI 岗位评估编排（Phase 4 / 4.1）。
 
 流程与权责：
 1. `build_evaluation_context()`：由后端自动构造真实 AI 输入（profile/job/region/
    evidence/hard_filters 五键）—— 同一份 dict 既发给模型、又原样存入
    input_snapshot，保证"数据库里保存的和模型实际看到的是同一份东西"。
-2. `evaluate_job()`：调 provider（Pydantic 校验 + 失败重试一次）→ region 维度
-   合成（AI 分优先，缺失时用地区基准分）→ `finalize_evaluation()` 确定性落库。
+   - job 含 organization 与 JD 正文（description_raw/clean），fit 等维度有真实依据；
+   - evidence 按 scope 严格分层过滤（job / organization / department / lab），
+     同校不同学院、同校其他岗位的证据不会串入。
+2. `evaluate_job()`：调 provider（Pydantic 校验 + 失败重试一次）→ 确定性合成
+   dimension_scores → `finalize_evaluation()` 落库。
+   - region 分数只由用户配置决定（unrated → null），AI 不得覆盖；
+   - 无可用 Evidence 时强制 reputation=null，不靠 Prompt 自觉。
 3. `finalize_evaluation()`（deterministic backend）：effective risk、
    total_score(provisional)、score_coverage、hard_filters、recommendation_level
    —— 最终等级只能由这里计算。
@@ -21,8 +26,9 @@ from sqlalchemy.orm import Session
 from app.ai.provider import LLMProvider
 from app.ai.schemas import JobEvaluationOut as AIEvaluationOut
 from app.core.config import get_profile_config, get_regions_config, get_scoring_config
+from app.core.fingerprint import normalize_text
 from app.core.hash import stable_json_hash
-from app.models import Evidence, Job, JobEvaluation, JobImportRecord  # noqa: F401
+from app.models import Evidence, Job, JobEvaluation  # noqa: F401
 from app.models.evaluation_evidence import EvaluationEvidence
 from app.services.hard_filters import check_hard_filters
 from app.services.regions import get_region_score, get_region_tier
@@ -57,8 +63,32 @@ def config_snapshots(profile: dict | None = None) -> dict:
     }
 
 
+def evidence_in_scope(job: Job, evidence: Evidence) -> bool:
+    """Evidence 作用域分层规则（Phase 4.1 P0-2）。
+
+    - 明确绑定当前岗位（job_id 匹配）→ 纳入，无论 scope 标注是什么；
+    - 绑定了其他岗位 → 即使单位相同也不复用（job_id 优先于 organization_id）；
+    - 只挂单位的证据按 scope_level 分层：
+      * organization / unknown → 纳入（单位级通用风评；unknown 不猜具体院系）
+      * department → 仅当 scope_name 归一化后等于当前岗位的院系
+      * lab → 不纳入（Job 没有实验室身份，不猜归属）
+    """
+    if evidence.job_id == job.id:
+        return True
+    if evidence.job_id is not None:
+        return False  # 绑定其他岗位
+    if job.organization_id is None or evidence.organization_id != job.organization_id:
+        return False
+    if evidence.scope_level in ("organization", "unknown"):
+        return True
+    if evidence.scope_level == "department":
+        return normalize_text(evidence.scope_name) == normalize_text(job.department or "")
+    return False  # lab 及未知层级且无岗位绑定的，一律不猜
+
+
 def _job_context_dict(job: Job) -> dict:
-    """岗位结构化信息（含高校四轴事实）→ AI 可读 dict。"""
+    """岗位结构化信息（含单位、JD 正文与高校四轴事实）→ AI 可读 dict。"""
+    org = job.organization
     details = job.academic_details
     academic = {}
     if details is not None:
@@ -94,7 +124,16 @@ def _job_context_dict(job: Job) -> dict:
         }
     return {
         "title": job.title,
+        "organization": (
+            {"id": org.id, "name": org.name, "organization_type": org.organization_type}
+            if org
+            else None
+        ),
         "department": job.department,
+        # JD 正文是 fit / research_resources / long_term 维度的核心输入
+        "description_raw": job.description_raw,
+        "description_clean": job.description_clean,
+        "source_url": job.source_url,
         "job_category": job.job_category,
         "country": job.country,
         "province": job.province,
@@ -120,15 +159,23 @@ def build_evaluation_context(db: Session, job: Job, profile: dict | None = None)
     """构造真实 AI 输入。返回的 dict 同时作为 user message 与 input_snapshot。"""
     profile_cfg = profile if profile is not None else get_profile_config()
 
-    # Evidence 作用域：只取属于当前岗位或其单位的证据（组织级风评是长期资产）
+    # 候选集放宽到岗位 + 单位，scope 分层在 Python 里精确过滤（Phase 4.1）；
+    # 按 id 排序保证 snapshot 输入稳定（真正的 Evidence selection/ranking 属 Phase 6）。
     if job.organization_id is not None:
-        scope = or_(
-            Evidence.job_id == job.id,
-            Evidence.organization_id == job.organization_id,
-        )
+        candidates = db.scalars(
+            select(Evidence)
+            .where(
+                or_(
+                    Evidence.job_id == job.id,
+                    Evidence.organization_id == job.organization_id,
+                )
+            )
+            .order_by(Evidence.id)
+        ).all()
     else:
-        scope = Evidence.job_id == job.id
-    evidence_rows = db.scalars(select(Evidence).where(scope)).all()
+        candidates = db.scalars(
+            select(Evidence).where(Evidence.job_id == job.id).order_by(Evidence.id)
+        ).all()
     evidence_list = [
         {
             "id": ev.id,
@@ -144,7 +191,8 @@ def build_evaluation_context(db: Session, job: Job, profile: dict | None = None)
             "source_author": ev.source_author,
             "published_at": str(ev.published_at) if ev.published_at else None,
         }
-        for ev in evidence_rows
+        for ev in candidates
+        if evidence_in_scope(job, ev)
     ]
 
     tier = get_region_tier(job.province, job.city)
@@ -170,41 +218,23 @@ def validate_input_snapshot(snapshot: object) -> None:
         raise ValueError(f"input_snapshot 缺少键: {sorted(missing)}，拒绝保存评估")
 
 
-def _validate_evidence_scope(db: Session, job: Job, provided_ids: list[int]) -> None:
-    """每条用于评估的 Evidence 必须属于当前岗位或其单位。"""
-    if not provided_ids:
-        return
-    rows = db.execute(
-        select(Evidence.id, Evidence.job_id, Evidence.organization_id).where(
-            Evidence.id.in_(provided_ids)
-        )
-    ).all()
-    for evidence_id, evidence_job_id, evidence_org_id in rows:
-        in_job_scope = evidence_job_id == job.id
-        in_org_scope = (
-            job.organization_id is not None
-            and evidence_org_id == job.organization_id
-        )
-        if not (in_job_scope or in_org_scope):
-            raise ValueError(
-                f"Evidence #{evidence_id} 不属于当前岗位或其单位，拒绝用于本次评估"
-            )
-
-
 def _validate_evidence_consistency(
     db: Session, job: Job, provided_ids: list[int], ai_output: AIEvaluationOut
 ) -> None:
     """risk_items.evidence_ids ⊆ 本次 evaluation evidence_ids ⊆ 作用域内的真实 Evidence。"""
-    _validate_evidence_scope(db, job, provided_ids)
     if provided_ids:
-        existing = set(
-            db.scalars(select(Evidence.id).where(Evidence.id.in_(provided_ids)))
-        )
-        missing = set(provided_ids) - existing
+        rows = db.scalars(select(Evidence).where(Evidence.id.in_(provided_ids))).all()
+        found = {ev.id for ev in rows}
+        missing = set(provided_ids) - found
         if missing:
             raise ValueError(
                 f"evidence_ids 引用了不存在的证据: {sorted(missing)}，拒绝保存评估"
             )
+        for ev in rows:
+            if not evidence_in_scope(job, ev):
+                raise ValueError(
+                    f"Evidence #{ev.id} 不属于当前岗位/单位/院系作用域，拒绝用于本次评估"
+                )
     for item in ai_output.risk_items:
         unprovided = [eid for eid in item.evidence_ids if eid not in provided_ids]
         if unprovided:
@@ -220,19 +250,19 @@ def evaluate_job(
     provider: LLMProvider,
     profile: dict | None = None,
 ) -> JobEvaluation:
-    """完整评估编排：构造 context → 调 AI → 确定性 finalize。同一份 context 发模型并存库。"""
+    """完整评估编排：构造 context → 调 AI → 确定性合成 → finalize 落库。"""
     context = build_evaluation_context(db, job, profile)
     validate_input_snapshot(context)
     ai_output, prompt_version = provider.evaluate_job(context)
 
+    # 维度分确定性合成（Phase 4.1）：
+    # - region 只由用户配置决定（unrated → null），AI 不得覆盖；
+    # - 无可用 Evidence 时强制 reputation=null，不靠 Prompt 自觉。
     scores = ai_output.scores.model_dump()
-    region_from_ai = scores.pop("region")
-    region_score = (
-        region_from_ai
-        if region_from_ai is not None
-        else get_region_score(job.province, job.city)
-    )
-    dimension_scores = {**scores, "region": region_score}
+    scores.pop("region", None)
+    if not context["evidence"]:
+        scores["reputation"] = None
+    dimension_scores = {**scores, "region": context["region"]["score"]}
     evidence_ids = [e["id"] for e in context["evidence"]]
 
     return finalize_evaluation(

@@ -312,6 +312,11 @@ export default function JobDetailPage() {
             </Card>
           ) : (
             <div className="grid grid-cols-2 gap-4">
+              {evaluateMutation.isError && (
+                <div className="col-span-2 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
+                  重新评估失败：{evaluateMutation.error.message}
+                </div>
+              )}
               <Card className="col-span-2">
                 <CardHeader className="flex items-center justify-between">
                   <CardTitle>本次评价依据（Evaluation Audit）</CardTitle>

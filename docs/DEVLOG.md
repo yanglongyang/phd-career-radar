@@ -295,3 +295,39 @@
 - 批量重评（修改权重后一键重评全部岗位）未实现——单岗位"重新评估"已可用，批量属 Phase 7 设置页。
 - input_snapshot 的读取 API/UI（当前数据完整入库，展示配置哈希即可满足 V0.1 审计）。
 - 风评聚合（ReputationSummary 调用）未接入流程，属 Phase 6。
+
+---
+
+## Phase 4.1 — Evaluation Integrity Fixes（2026-08-31 完成）
+
+依据第五轮审查执行：修复四个直接影响评分可信度的 P0 与四个 P1。**无新 migration。**
+
+### P0 修复
+
+1. **Job Context 补齐 organization 与 JD 正文（P0-1）**：`_job_context_dict()` 新增 `organization{id,name,organization_type}`、`description_raw`、`description_clean`、`source_url` —— `fit / research_resources / long_term` 维度从此有真实依据（此前模型甚至不知道岗位属于哪所大学、看不到公告正文）。测试断言 context 与数据库逐字段一致。
+2. **Evidence 作用域真正分层（P0-2）**：新增 `evidence_in_scope()` 共享规则，context 构造与 finalize 校验共用 ——
+   - 绑定当前岗位 → 纳入（无论 scope 标注）；
+   - 绑定**其他**岗位 → 排除（job_id 优先于 organization_id，同校不串岗位）；
+   - 只挂单位时按 scope_level 分层：`organization`/`unknown` 纳入（unknown 不猜具体院系）、`department` 仅当 scope_name 归一化等于当前院系（同校医学院证据不再串入化学学院）、`lab` 不纳入（Job 无实验室身份，不猜）。
+   测试覆盖 7 种组合；context 按 Evidence.id 排序，snapshot 输入稳定。
+3. **无 Evidence 强制 reputation=null（P0-3）**：编排层 `evaluate_job()` 在 `context["evidence"]` 为空时强制 `reputation=null`（选择强制 null 而非报错，不因模型犯错导致整个评估失败）——UI 的"风评维度将以 null 呈现"从此是后端保证而非 Prompt 恳求。测试：AI 给 80 → 落库 null。
+4. **region 只由用户配置决定（P0-4）**：AI 的 region 分一律忽略（含 unrated 场景），`region_score = context["region"]["score"]`——AI 擅自给未评价城市打 75 分的回流问题封死。测试：AI 75 被忽略（unrated→None），配置基准 90 时 AI 75 仍被忽略。
+
+### P1 修复
+
+5. **审计 Evidence 冻结自 input_snapshot**：`evidence_items` 优先读 `input_snapshot_json["evidence"]`（模型当时实际看到的文本），Evidence 后续编辑不再使历史审计漂移；旧数据无 snapshot 时回退实时内容。测试：评估后修改 claim，API 仍返回旧文本。
+6. **重新评估失败提示**：详情页已有评估时"重新评估"失败也会在审计卡上方显示错误（与首次评估一致）。
+7. **Evidence context 排序**：`ORDER BY Evidence.id`（真正的 selection/ranking 属 Phase 6）。
+8. **AI 关键字段必填**：`risk_level / confidence / scores` 去掉默认值——模型漏字段触发重试，而不是被 Pydantic 补成 medium（"没输出风险" ≠ "明确判断中风险"）。测试覆盖三个字段逐一缺失。
+
+### 数据库变化
+
+- 无新表/新列，无新 migration。
+
+### 测试 / lint / build
+
+- pytest：**114 passed**（新增 P0×4 与 P1×4 对应测试）；vitest：9 passed；ruff：All checks passed；前端 build：通过。
+
+### 明确未实现
+
+- **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合（Phase 6）、Evidence selection/ranking（Phase 6）未实现。

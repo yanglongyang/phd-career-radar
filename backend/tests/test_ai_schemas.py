@@ -131,3 +131,12 @@ def test_get_provider_none_when_not_configured():
 
     s = Settings(llm_api_key="", llm_base_url="", llm_model="")
     assert get_provider(s) is None
+
+
+def test_evaluation_required_fields_have_no_defaults():
+    """Phase 4.1：risk_level / confidence / scores 必填 —— 模型漏字段触发重试，
+    而不是被 Pydantic 静默补成 medium（"没输出风险" != "明确判断中风险"）。"""
+    for missing in ("risk_level", "confidence", "scores"):
+        bad = {k: v for k, v in VALID_EVAL.items() if k != missing}
+        with pytest.raises(ValidationError):
+            JobEvaluationOut.model_validate(bad)

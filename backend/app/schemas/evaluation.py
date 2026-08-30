@@ -103,15 +103,43 @@ class JobEvaluationOut(BaseModel):
             profile_hash=e.profile_hash,
             scoring_config_hash=e.scoring_config_hash,
             region_config_hash=e.region_config_hash,
-            evidence_items=[
-                EvaluationEvidenceBrief(
-                    id=link.evidence.id,
-                    claim=link.evidence.claim,
-                    evidence_level=link.evidence.evidence_level,
-                    source_type=link.evidence.source_type,
-                    scope_level=link.evidence.scope_level,
-                    stance=link.evidence.stance,
-                )
-                for link in e.evidence_links
-            ],
+            evidence_items=cls._evidence_items(e),
         )
+
+    @staticmethod
+    def _evidence_items(e: "JobEvaluation") -> list["EvaluationEvidenceBrief"]:
+        """审计展示优先读 input_snapshot 里冻结的 Evidence 内容（模型当时实际看到的），
+        避免后续编辑 Evidence 导致历史审计漂移；旧数据无 snapshot 时回退实时内容。"""
+        snapshot = e.input_snapshot_json if isinstance(e.input_snapshot_json, dict) else {}
+        frozen = {
+            item.get("id"): item
+            for item in (snapshot.get("evidence") or [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        items: list[EvaluationEvidenceBrief] = []
+        for link in e.evidence_links:
+            item = frozen.get(link.evidence_id)
+            if item is not None:
+                items.append(
+                    EvaluationEvidenceBrief(
+                        id=link.evidence_id,
+                        claim=str(item.get("claim") or ""),
+                        evidence_level=str(item.get("evidence_level") or "C"),
+                        source_type=item.get("source_type"),
+                        scope_level=item.get("scope_level"),
+                        stance=item.get("stance"),
+                    )
+                )
+            else:
+                ev = link.evidence
+                items.append(
+                    EvaluationEvidenceBrief(
+                        id=ev.id,
+                        claim=ev.claim,
+                        evidence_level=ev.evidence_level,
+                        source_type=ev.source_type,
+                        scope_level=ev.scope_level,
+                        stance=ev.stance,
+                    )
+                )
+        return items
