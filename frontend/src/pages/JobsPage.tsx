@@ -3,13 +3,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, buildQuery, type JobQueryParams } from "../services/api";
 import type { JobListItem } from "../types";
-import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from "../components/ui";
-import {
-  JOB_CATEGORY_LABELS,
-  JOB_STATUS_LABELS,
-  POSITION_NATURE_LABELS,
-  formatDate,
-} from "../lib/utils";
+import { Button, Card, EmptyState, Input, PageHeader, Select } from "../components/ui";
+import { JOB_CATEGORY_LABELS, JOB_STATUS_LABELS, formatDate } from "../lib/utils";
 
 interface JobListPage {
   items: JobListItem[];
@@ -41,9 +36,14 @@ export default function JobsPage() {
         title="岗位库"
         subtitle={data ? `共 ${data.total} 个岗位` : undefined}
         actions={
-          <Link to="/jobs/new">
-            <Button>+ 新增岗位</Button>
-          </Link>
+          <>
+            <Link to="/jobs/import">
+              <Button variant="outline">AI 解析导入</Button>
+            </Link>
+            <Link to="/jobs/new">
+              <Button>+ 手工新增</Button>
+            </Link>
+          </>
         }
       />
 
@@ -84,7 +84,6 @@ export default function JobsPage() {
                 <th className="px-4 py-2.5 font-medium">岗位</th>
                 <th className="px-4 py-2.5 font-medium">单位 / 院系</th>
                 <th className="px-4 py-2.5 font-medium">类型</th>
-                <th className="px-4 py-2.5 font-medium">性质</th>
                 <th className="px-4 py-2.5 font-medium">地点</th>
                 <th className="px-4 py-2.5 font-medium">待遇</th>
                 <th className="px-4 py-2.5 font-medium">状态</th>
@@ -106,11 +105,6 @@ export default function JobsPage() {
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500 dark:text-zinc-400">
                     {JOB_CATEGORY_LABELS[job.job_category] ?? job.job_category}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge tone={job.position_nature === "unknown" ? "zinc" : "neutral"}>
-                      {POSITION_NATURE_LABELS[job.position_nature] ?? job.position_nature}
-                    </Badge>
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500 dark:text-zinc-400">
                     {[job.province, job.city].filter(Boolean).join(" · ") || "—"}

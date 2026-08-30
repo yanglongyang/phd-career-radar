@@ -4,10 +4,19 @@ from tests.conftest import JOB_PAYLOAD
 def test_create_job_with_organization_autocreate(client, sample_job):
     assert sample_job["title"] == JOB_PAYLOAD["title"]
     assert sample_job["organization"]["name"] == "示例大学"
-    # Phase 2.1.1：position_nature 退休为只读 legacy 字段，新写入一律 unknown
-    # （JOB_PAYLOAD 里的 position_nature 值被 schema 忽略）
+    # Phase 2.1.1：position_nature 退休为只读 legacy 字段，新岗位一律 unknown
     assert sample_job["position_nature"] == "unknown"
     assert sample_job["status"] == "new"
+
+
+def test_unknown_field_rejected_with_422(client):
+    """Phase 3 Step 0：写入 Schema extra=forbid —— 未知字段（如退休的 position_nature）
+    显式 422，而不是被静默忽略让用户误以为写进去了。"""
+    resp = client.post("/api/jobs", json={**JOB_PAYLOAD, "position_nature": "tenure_track"})
+    assert resp.status_code == 422
+    assert "extra_forbidden" in resp.text
+    resp = client.post("/api/jobs", json={**JOB_PAYLOAD, "totally_unknown_field": 1})
+    assert resp.status_code == 422
 
 
 def test_get_job_detail(client, sample_job):

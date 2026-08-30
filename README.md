@@ -99,6 +99,7 @@ LLM_MODEL=gpt-4o-mini
 ```
 
 - AI 未配置时系统仍可正常使用手工功能，AI 相关操作返回明确错误，不会伪造评估结果。
+- Phase 3 的「AI 解析导入」页在 AI 未配置时会明确提示；URL 抓取失败时提示改用粘贴模式，不做任何反爬对抗。
 - 所有 AI 评价保留 `model`、`prompt_version`、`evaluated_at` 与原始 JD（审计性），Prompt 在 `backend/app/ai/prompts/` 按版本管理。
 
 ## 配置 Profile / 权重 / 地区
@@ -129,7 +130,7 @@ python -m alembic downgrade -1     # 回退一步
 | 2 | Job/Organization CRUD、岗位列表/详情、手工导入、去重、版本监控、Dashboard API | ✅ 完成 |
 | 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |
 | 2.1.1 | Consistency fixes：四轴 null→unknown 归一、Risk 证据引用强一致（⊆ 本次评估 ⊆ 真实存在）、effective_risk 由后端派生、reject_high_risk_tenure_track 真正执行、position_nature 完全退休、input_snapshot 强制 | ✅ 完成 |
-| 3 | AI 结构化提取（粘贴 JD → 结构化岗位 → 用户确认 → 保存） | ⬜ 未实现 |
+| 3 | AI 结构化提取：粘贴公告/URL → AI 解析 → 结构化预览（含信息缺口标注）→ 用户逐项确认/修正 → 岗位+高校字段原子入库 | ✅ 完成（需在 .env 配置 AI 后使用；预览接口不写库，保存永远经用户确认） |
 | 4 | AI 评估（Profile + Job + Evidence → 结构化评估、风险、可信度；推荐等级由后端规则引擎计算） | ⬜ 未实现（Provider/Schema/规则引擎已就绪） |
 | 5 | Career CRM（Shortlist、申请状态 Kanban、next action） | ⬜ 未实现（数据模型已建） |
 | 6 | Evidence CRUD UI 与风评聚合、可信度呈现 | ⬜ 未实现（数据模型已建） |

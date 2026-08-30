@@ -60,3 +60,10 @@ export function buildQuery(params: Record<string, unknown>): string {
   const s = search.toString();
   return s ? `?${s}` : "";
 }
+
+export async function extractPreview(payload: {
+  text?: string;
+  url?: string;
+}): Promise<import("../types").ExtractionPreview> {
+  return api("/jobs/extract-preview", { method: "POST", body: JSON.stringify(payload) });
+}

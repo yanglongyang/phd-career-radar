@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.academic import AcademicJobDetailsOut
+from app.schemas.academic import AcademicJobDetailsOut, AcademicJobDetailsUpdate
 from app.schemas.evaluation import JobEvaluationOut
 from app.schemas.organization import OrganizationBrief
 
@@ -32,7 +32,11 @@ class JobSort(StrEnum):
 
 
 class JobCreate(BaseModel):
-    """手工新建岗位（Phase 2）。AI 粘贴解析在 Phase 3 提供。"""
+    """手工新建岗位 / AI 解析确认后的保存。
+
+    extra="forbid"：未知字段显式 422，不静默忽略（透明优先于兼容）。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=256)
 
@@ -74,11 +78,16 @@ class JobCreate(BaseModel):
 
     status: JobDispositionLiteral = "new"
 
+    # AI 解析确认后随岗位原子入库（Phase 3）；手工新建可不传
+    academic_details: AcademicJobDetailsUpdate | None = None
+
     allow_duplicate: bool = False  # 去重冲突时由用户确认仍要创建
 
 
 class JobUpdate(BaseModel):
     """部分更新。description_raw/salary_text/deadline 变化会自动保存 JobVersion。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, min_length=1, max_length=256)
     organization_id: int | None = None

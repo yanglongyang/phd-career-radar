@@ -40,10 +40,6 @@ class JobExtractionOut(BaseModel):
     country: str | None = None
     province: str | None = None
     city: str | None = None
-    position_nature: Literal[
-        "permanent", "tenure", "tenure_track", "pre_tenure",
-        "fixed_term", "postdoc", "pi_funded", "unknown",
-    ] = "unknown"
     employment_type: str | None = None
     posted_at: str | None = None
     deadline: str | None = None

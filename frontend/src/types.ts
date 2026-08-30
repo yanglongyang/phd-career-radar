@@ -152,15 +152,74 @@ export interface JobCreateInput {
   posted_at?: string | null;
   deadline?: string | null;
   employment_type?: string | null;
-  position_nature?: string;
   salary_text?: string | null;
+  salary_currency?: string | null;
+  salary_period?: string | null;
   salary_min?: number | null;
   salary_max?: number | null;
   degree_requirement?: string | null;
   experience_requirement?: string | null;
   source_url?: string | null;
   status?: string;
+  academic_details?: Partial<AcademicJobDetails> | null;
   allow_duplicate?: boolean;
+}
+
+export interface JobExtraction {
+  title: string;
+  organization: string | null;
+  department: string | null;
+  job_category: string;
+  country: string | null;
+  province: string | null;
+  city: string | null;
+  employment_type: string | null;
+  posted_at: string | null;
+  deadline: string | null;
+  salary_text: string | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  degree_requirement: string | null;
+  experience_requirement: string | null;
+  establishment_status: string;
+  tenure_status: string;
+  contract_type: string;
+  funding_source: string;
+  is_up_or_out: boolean | null;
+  contract_years: number | null;
+  first_contract_period: string | null;
+  midterm_review: string | null;
+  final_review: string | null;
+  publication_requirements: string | null;
+  grant_requirements: string | null;
+  teaching_requirements: string | null;
+  admin_requirements: string | null;
+  current_title: string | null;
+  promotion_path: string | null;
+  independent_pi: boolean | null;
+  lab_space: string | null;
+  startup_funding: string | null;
+  startup_funding_terms: string | null;
+  can_supervise_master: boolean | null;
+  can_supervise_phd: boolean | null;
+  master_quota: string | null;
+  phd_quota: string | null;
+  annual_salary: string | null;
+  fixed_income: string | null;
+  performance_income: string | null;
+  housing_settlement: string | null;
+  housing_subsidy: string | null;
+  talent_housing: string | null;
+  regional_talent_subsidy: string | null;
+  unknowns: string[];
+}
+
+export interface ExtractionPreview {
+  source_text: string;
+  extraction: JobExtraction;
+  provider: string;
+  model: string | null;
+  prompt_version: string;
 }
 
 export interface JobUpdateInput {

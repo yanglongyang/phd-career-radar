@@ -13,8 +13,8 @@ from app.core.fingerprint import (
     job_fingerprint,
     normalize_org_name,
 )
-from app.models import Evidence, Job, JobEvaluation, JobVersion, Organization
-from app.models.enums import PositionNature
+from app.models import AcademicJobDetails, Evidence, Job, JobEvaluation, JobVersion, Organization
+from app.schemas.academic import AcademicJobDetailsUpdate
 from app.schemas.job import JobCreate, JobUpdate
 
 # 这些字段变化时保存 JobVersion（历史快照），不覆盖旧数据
@@ -28,6 +28,20 @@ DUPLICATE_DESCRIPTION_SIMILARITY = 0.92
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# 四轴字段：显式 null 一律归一为 "unknown"（数据库 NOT NULL，不存在第二套未知）
+AXIS_FIELDS = ("establishment_status", "tenure_status", "contract_type", "funding_source")
+
+
+def apply_academic_details(details: AcademicJobDetails, payload: AcademicJobDetailsUpdate) -> None:
+    """把 Update payload 应用到 AcademicJobDetails（部分更新语义 + 四轴 null 归一）。"""
+    data = payload.model_dump(exclude_unset=True)
+    for axis in AXIS_FIELDS:
+        if axis in payload.model_fields_set and data[axis] is None:
+            data[axis] = "unknown"
+    for field, value in data.items():
+        setattr(details, field, value)
 
 
 def get_or_create_organization(
@@ -127,6 +141,11 @@ def create_job(db: Session, payload: JobCreate) -> tuple[Job, Job | None]:
         first_seen_at=_now(),
         last_seen_at=_now(),
     )
+    if payload.academic_details is not None:
+        details = AcademicJobDetails(job_id=job.id)
+        apply_academic_details(details, payload.academic_details)
+        job.academic_details = details
+        db.add(details)
     db.add(job)
     db.flush()
     return job, duplicate
@@ -306,6 +325,3 @@ def top_jobs(db: Session, limit: int = 5) -> list[tuple[Job, JobEvaluation | Non
     )
     return [(job, evaluation) for job, evaluation in db.execute(stmt)]
 
-
-def default_position_nature_is_unknown(job: Job) -> bool:
-    return job.position_nature == PositionNature.unknown.value

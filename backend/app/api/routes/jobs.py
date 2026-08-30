@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai.provider import get_provider
+from app.ai.provider import AIError
+from app.api.deps import get_ai_provider
 from app.db.session import get_db
 from app.models import JobEvaluation
 from app.models.academic_job_details import AcademicJobDetails
 from app.schemas.academic import AcademicJobDetailsOut, AcademicJobDetailsUpdate
 from app.schemas.evaluation import JobEvaluationOut
+from app.schemas.extraction import ExtractionPreviewOut, ExtractionRequest
 from app.schemas.job import (
     JobCreate,
     JobDetailOut,
@@ -21,6 +23,7 @@ from app.schemas.job import (
 )
 from app.schemas.organization import OrganizationBrief
 from app.services import jobs as job_service
+from app.services.web import PageFetchError, fetch_url_text
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -232,12 +235,7 @@ def update_academic_details(
         details = AcademicJobDetails(job_id=job.id)
         job.academic_details = details
         db.add(details)
-    data = payload.model_dump(exclude_unset=True)
-    for axis in ("establishment_status", "tenure_status", "contract_type", "funding_source"):
-        if axis in payload.model_fields_set and data[axis] is None:
-            data[axis] = "unknown"
-    for field, value in data.items():
-        setattr(details, field, value)
+    job_service.apply_academic_details(details, payload)
     db.commit()
     db.refresh(details)
     return AcademicJobDetailsOut.model_validate(details)
@@ -255,16 +253,53 @@ def list_evaluations(job_id: int, db: Session = Depends(get_db)):
     return [JobEvaluationOut.from_model(e) for e in sorted(rows, key=lambda x: x.id, reverse=True)]
 
 
+@router.post("/extract-preview", response_model=ExtractionPreviewOut)
+def extract_preview(
+    payload: ExtractionRequest, provider=Depends(get_ai_provider)
+):
+    """粘贴公告文本或 URL → AI 结构化解析 → 返回预览（不写数据库）。
+
+    用户在预览中逐项确认/修正后，通过 POST /api/jobs（含嵌套 academic_details）
+    原子保存。解析失败或 AI 未配置时给出明确错误，不伪造结果。"""
+    # 请求校验（422）→ AI 配置检查（503）→ AI 调用错误（502），失败快速且语义明确
+    text = payload.text
+    if text is None:
+        if not payload.url:
+            raise HTTPException(status_code=422, detail="请提供公告全文（text）或链接（url）")
+        try:
+            text = fetch_url_text(payload.url)
+        except PageFetchError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+    if len(text.strip()) < 50:
+        raise HTTPException(status_code=422, detail="公告正文过短（少于 50 字符），请检查内容")
+    if provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI 未配置：请在 .env 中设置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 后重试",
+        )
+    try:
+        extraction, prompt_version = provider.extract_job(text.strip())
+    except AIError as e:
+        raise HTTPException(status_code=502, detail=f"AI 解析失败：{e}") from e
+    return ExtractionPreviewOut(
+        source_text=text.strip(),
+        extraction=extraction,
+        provider=provider.name,
+        model=getattr(provider, "model", None),
+        prompt_version=prompt_version,
+    )
+
+
 @router.post("/{job_id}/evaluate")
-def evaluate_job(job_id: int, db: Session = Depends(get_db)):
+def evaluate_job(job_id: int, db: Session = Depends(get_db), provider=Depends(get_ai_provider)):
     """Phase 4 接入。此处先给出明确的不可用状态，避免静默伪造评估。"""
     try:
         job_service.get_job_or_404(db, job_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    if get_provider() is None:
+    if provider is None:
         raise HTTPException(
             status_code=503,
             detail="AI 未配置：请在 .env 中设置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL",
         )
-    raise HTTPException(status_code=503, detail="AI 评估将在 Phase 4 提供（Provider 已就绪）")
+    raise HTTPException(status_code=503, detail="AI 评估将在 Phase 4 提供（Provider 与规则引擎已就绪）")

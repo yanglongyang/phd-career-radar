@@ -64,7 +64,6 @@ JOB_PAYLOAD = {
     "job_category": "university_research",
     "province": "江苏",
     "city": "南京",
-    "position_nature": "tenure_track",
     "salary_text": "年薪 30-40 万",
     "salary_min": 30,
     "salary_max": 40,

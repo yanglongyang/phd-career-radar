@@ -25,10 +25,10 @@ import {
   FUNDING_SOURCE_LABELS,
   JOB_CATEGORY_LABELS,
   JOB_STATUS_LABELS,
-  POSITION_NATURE_LABELS,
   RISK_LABELS,
   RECOMMENDATION_LABELS,
   TENURE_LABELS,
+  employmentSummary,
   formatDate,
 } from "../lib/utils";
 import type { AcademicJobDetails } from "../types";
@@ -183,9 +183,9 @@ export default function JobDetailPage() {
             </Badge>
           </div>
           <div>
-            <p className="mb-1 text-xs text-zinc-500">岗位性质</p>
-            <Badge tone={job.position_nature === "unknown" ? "zinc" : "neutral"}>
-              {POSITION_NATURE_LABELS[job.position_nature] ?? job.position_nature}
+            <p className="mb-1 text-xs text-zinc-500">聘用</p>
+            <Badge tone={job.academic_details ? "neutral" : "zinc"}>
+              {employmentSummary(job.academic_details)}
             </Badge>
           </div>
           <div>

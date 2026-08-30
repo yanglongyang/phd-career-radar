@@ -18,17 +18,6 @@ export const JOB_CATEGORY_LABELS: Record<string, string> = {
   other: "其他",
 };
 
-export const POSITION_NATURE_LABELS: Record<string, string> = {
-  permanent: "事业编/长聘（legacy）",
-  tenure: "长聘（legacy）",
-  tenure_track: "预聘 / Tenure-track",
-  pre_tenure: "预聘期内",
-  fixed_term: "合同制",
-  postdoc: "博士后",
-  pi_funded: "PI经费聘用",
-  unknown: "未知/待确认",
-};
-
 // 岗位信息筛选状态（JobDisposition）；求职流程状态由申请记录负责
 export const JOB_STATUS_LABELS: Record<string, string> = {
   new: "新发现",
@@ -37,6 +26,25 @@ export const JOB_STATUS_LABELS: Record<string, string> = {
   ignored: "已忽略",
   closed: "已关闭",
 };
+
+// 详情页顶部"聘用"摘要：由 AcademicJobDetails 四轴派生（legacy position_nature 已退出展示）
+export function employmentSummary(d: {
+  establishment_status: string;
+  tenure_status: string;
+  contract_type: string;
+  funding_source: string;
+  is_up_or_out: boolean | null;
+} | null): string {
+  if (!d) return "未知 / 待确认";
+  const parts = [
+    ESTABLISHMENT_LABELS[d.establishment_status] ?? d.establishment_status,
+    TENURE_LABELS[d.tenure_status] ?? d.tenure_status,
+    CONTRACT_TYPE_LABELS[d.contract_type] ?? d.contract_type,
+    FUNDING_SOURCE_LABELS[d.funding_source] ?? d.funding_source,
+  ];
+  if (d.is_up_or_out === true) parts.push("非升即走");
+  return parts.join(" · ");
+}
 
 export const ESTABLISHMENT_LABELS: Record<string, string> = {
   established: "事业编",

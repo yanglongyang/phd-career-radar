@@ -7,7 +7,7 @@ Update Schema 用 Literal 校验取值；exclude_unset 支持部分更新，
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 ContractTypeLiteral = Literal["open_ended", "fixed_term", "unknown"]
 EstablishmentLiteral = Literal["established", "non_established", "unknown"]
@@ -58,6 +58,9 @@ class AcademicJobDetailsOut(BaseModel):
 
 
 class AcademicJobDetailsUpdate(BaseModel):
+    """嵌套于 JobCreate（Phase 3 保存）或用于 PATCH 部分更新。"""
+
+    model_config = ConfigDict(extra="forbid")
     establishment_status: EstablishmentLiteral | None = None
     tenure_status: TenureLiteral | None = None
     contract_type: ContractTypeLiteral | None = None
