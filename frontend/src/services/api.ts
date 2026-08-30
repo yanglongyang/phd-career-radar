@@ -71,3 +71,34 @@ export async function extractPreview(payload: {
 export async function evaluateJob(jobId: number): Promise<import("../types").Evaluation> {
   return api(`/jobs/${jobId}/evaluate`, { method: "POST" });
 }
+
+export async function listApplications(params: { status?: string; q?: string; sort?: string } = {}) {
+  return api<{ items: import("../types").Application[]; total: number }>(
+    `/applications${buildQuery(params)}`,
+  );
+}
+
+export async function getApplicationByJob(jobId: number): Promise<import("../types").Application | null> {
+  return api(`/jobs/${jobId}/application`);
+}
+
+export async function createApplication(jobId: number, payload: import("../types").ApplicationCreateInput = {}) {
+  return api<import("../types").Application>(`/jobs/${jobId}/application`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateApplication(
+  applicationId: number,
+  payload: import("../types").ApplicationUpdateInput,
+) {
+  return api<import("../types").Application>(`/applications/${applicationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteApplication(applicationId: number) {
+  return api<void>(`/applications/${applicationId}`, { method: "DELETE" });
+}

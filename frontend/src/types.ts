@@ -271,3 +271,45 @@ export interface Dashboard {
   counts: DashboardCounts;
   top_jobs: JobListItem[];
 }
+
+export interface ApplicationJobBrief {
+  id: number;
+  title: string;
+  organization_name: string | null;
+  department: string | null;
+  city: string | null;
+  deadline: string | null;
+  total_score: number | null;
+  recommendation_level: string | null;
+}
+
+export interface Application {
+  id: number;
+  job_id: number;
+  status: string;
+  priority: number | null;
+  applied_at: string | null;
+  resume_version: string | null;
+  cover_letter_version: string | null;
+  contact: string | null;
+  notes: string | null;
+  next_action: string | null;
+  next_action_date: string | null;
+  created_at: string;
+  updated_at: string;
+  job: ApplicationJobBrief | null;
+  allowed_next_statuses: string[];
+}
+
+export interface ApplicationCreateInput {
+  status?: string;
+  priority?: number | null;
+  resume_version?: string | null;
+  cover_letter_version?: string | null;
+  contact?: string | null;
+  notes?: string | null;
+  next_action?: string | null;
+  next_action_date?: string | null;
+}
+
+export interface ApplicationUpdateInput extends ApplicationCreateInput {}

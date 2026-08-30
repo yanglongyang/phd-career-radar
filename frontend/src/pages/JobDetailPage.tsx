@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, evaluateJob } from "../services/api";
+import { api, createApplication, evaluateJob, getApplicationByJob, updateApplication } from "../services/api";
 import type { JobDetail } from "../types";
 import {
   Badge,
@@ -19,6 +19,8 @@ import {
   Textarea,
 } from "../components/ui";
 import {
+  APPLICATION_STATUS_LABELS,
+  applicationStatusTone,
   CONFIDENCE_LABELS,
   CONTRACT_TYPE_LABELS,
   ESTABLISHMENT_LABELS,
@@ -97,6 +99,31 @@ export default function JobDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setTab("evaluation");
+    },
+  });
+
+  const applicationQuery = useQuery({
+    queryKey: ["application", id],
+    queryFn: () => getApplicationByJob(Number(id)),
+    enabled: !!id,
+  });
+  const application = applicationQuery.data ?? null;
+
+  const createAppMutation = useMutation({
+    mutationFn: () => createApplication(Number(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["application", id] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+  const appStatusMutation = useMutation({
+    mutationFn: ({ appId, status }: { appId: number; status: string }) =>
+      updateApplication(appId, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["application", id] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 
@@ -467,10 +494,66 @@ export default function JobDetailPage() {
         )}
 
         {tab === "application" && (
-          <EmptyState
-            title="申请 CRM 将在 Phase 5 提供"
-            hint="Shortlist、申请状态流转（14 个状态）、面试记录与 next action。"
-          />
+          application ? (
+            <Card>
+              <CardHeader className="flex items-center justify-between">
+                <CardTitle>申请记录</CardTitle>
+                <Badge tone={applicationStatusTone(application.status)}>
+                  {APPLICATION_STATUS_LABELS[application.status] ?? application.status}
+                </Badge>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <InfoRow label="下一步" value={application.next_action ?? "—"} />
+                  <InfoRow label="行动日期" value={formatDate(application.next_action_date)} />
+                  <InfoRow label="联系人" value={application.contact ?? "—"} />
+                  <InfoRow label="投递时间" value={application.applied_at ? formatDate(application.applied_at) : "未投递"} />
+                  <InfoRow label="简历版本" value={application.resume_version ?? "—"} />
+                  <InfoRow label="Cover Letter" value={application.cover_letter_version ?? "—"} />
+                </div>
+                {application.notes && (
+                  <p className="whitespace-pre-wrap rounded bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300">
+                    {application.notes}
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs text-zinc-500">流转到：</span>
+                  {application.allowed_next_statuses.map((s) => (
+                    <Button
+                      key={s}
+                      size="sm"
+                      variant="outline"
+                      disabled={appStatusMutation.isPending}
+                      onClick={() => appStatusMutation.mutate({ appId: application.id, status: s })}
+                    >
+                      {APPLICATION_STATUS_LABELS[s] ?? s}
+                    </Button>
+                  ))}
+                  <Link to="/applications" className="ml-auto text-xs underline">
+                    在申请 CRM 中打开 →
+                  </Link>
+                </div>
+                {appStatusMutation.isError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{appStatusMutation.error.message}</p>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-10">
+                <p className="text-sm text-zinc-500">该岗位还没有进入申请流程</p>
+                <p className="text-xs text-zinc-400">
+                  创建申请后即可在「申请 CRM」中管理状态流转、下一步行动与面试进度。
+                </p>
+                {createAppMutation.isError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{createAppMutation.error.message}</p>
+                )}
+                <Button onClick={() => createAppMutation.mutate()} disabled={createAppMutation.isPending}>
+                  创建申请（加入 CRM）
+                </Button>
+              </CardContent>
+            </Card>
+          )
         )}
 
         {tab === "history" && (

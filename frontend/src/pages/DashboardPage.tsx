@@ -9,15 +9,20 @@ import {
   formatDate,
 } from "../lib/utils";
 
-const COUNT_CARDS: { key: keyof Dashboard["counts"]; label: string; accent: string }[] = [
-  { key: "new_today", label: "今日新增", accent: "text-zinc-900 dark:text-zinc-100" },
-  { key: "to_review", label: "待查看", accent: "text-zinc-900 dark:text-zinc-100" },
-  { key: "high_match", label: "高匹配（S/A）", accent: "text-emerald-600 dark:text-emerald-400" },
-  { key: "focus", label: "重点关注", accent: "text-sky-600 dark:text-sky-400" },
-  { key: "preparing", label: "准备投递", accent: "text-amber-600 dark:text-amber-400" },
-  { key: "applied", label: "已投递", accent: "text-zinc-900 dark:text-zinc-100" },
-  { key: "interviewing", label: "面试中", accent: "text-sky-600 dark:text-sky-400" },
-  { key: "offer", label: "Offer", accent: "text-emerald-600 dark:text-emerald-400" },
+const COUNT_CARDS: {
+  key: keyof Dashboard["counts"];
+  label: string;
+  accent: string;
+  to?: string;
+}[] = [
+  { key: "new_today", label: "今日新增", accent: "text-zinc-900 dark:text-zinc-100", to: "/jobs" },
+  { key: "to_review", label: "待查看", accent: "text-zinc-900 dark:text-zinc-100", to: "/jobs" },
+  { key: "high_match", label: "高匹配（S/A）", accent: "text-emerald-600 dark:text-emerald-400", to: "/jobs" },
+  { key: "focus", label: "重点关注", accent: "text-sky-600 dark:text-sky-400", to: "/jobs" },
+  { key: "preparing", label: "准备投递", accent: "text-amber-600 dark:text-amber-400", to: "/applications" },
+  { key: "applied", label: "已投递", accent: "text-zinc-900 dark:text-zinc-100", to: "/applications" },
+  { key: "interviewing", label: "面试中", accent: "text-sky-600 dark:text-sky-400", to: "/applications" },
+  { key: "offer", label: "Offer", accent: "text-emerald-600 dark:text-emerald-400", to: "/applications" },
 ];
 
 function recommendationTone(level: string | null) {
@@ -54,7 +59,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-4 gap-3">
         {COUNT_CARDS.map((card) => (
-          <Card key={card.key}>
+          <Card key={card.key} className={card.to ? "cursor-pointer transition-colors hover:border-zinc-400 dark:hover:border-zinc-600" : ""} onClick={card.to ? () => (window.location.href = card.to!) : undefined}>
             <CardContent className="py-4">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">{card.label}</p>
               <p className={`mt-1 text-2xl font-semibold tabular-nums ${card.accent}`}>

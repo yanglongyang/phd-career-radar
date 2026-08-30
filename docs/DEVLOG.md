@@ -406,3 +406,45 @@ dimension_scores 传 region=80（那是在锁定错误行为），改为 snapsho
 
 - **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合与
   unknown scope 策略（Phase 6）未实现。
+
+---
+
+## Phase 5 — Career CRM（2026-08-31 完成）
+
+原则：**不修改 Phase 2-4 的核心事实/评分模型，CRM 只消费评估结果**。Application 模型与
+Dashboard 流程计数在 Phase 2.1 已就位，本轮无新表/无 migration。
+
+### 已实现
+
+- **API**（`/api/applications`、`/api/jobs/{id}/application`）：
+  - 创建（每岗位一条，重复 409；可直接指定起始状态）、按岗位查询、部分更新、删除（岗位与评估保留）；
+  - **状态流转校验**：PATCH status 受 `APPLICATION_STATUS_TRANSITIONS` 约束——正向推进合法、
+    非法跳转/终止态出边 → 409 并附"允许的目标状态"提示；进入 contacting/applied 自动记录投递时间；
+  - 列表：status 过滤、q 搜索（next_action/备注/联系人 + 岗位标题/院系）、排序（更新时间/行动日期/优先级）；
+  - 响应携带 `allowed_next_statuses`（驱动 UI 只显示合法流转）与 job brief（标题/单位/评分/推荐等级）；
+  - 写入 Schema `extra="forbid"`。
+- **前端申请 CRM 页**（侧边栏「申请 CRM」）：
+  - **看板视图**：14 个状态列横向滚动，卡片（岗位/单位/评分/next action，逾期标红）HTML5 拖拽改状态；
+    流转被后端拒绝时显示错误并回滚显示；
+  - **列表视图**：表格 + 编辑入口；
+  - **编辑面板**：状态（只列当前 + 合法目标）、优先级、next action/日期、联系人、简历/Cover Letter 版本、备注、删除。
+- **岗位详情 Application 页签**：创建申请（加入 CRM）、申请状态与 next action 摘要、
+  一键流转按钮（仅合法目标）、非法流转错误提示、"在申请 CRM 中打开"。
+- **Dashboard 联动**：preparing/applied/interviewing/offer 计数卡点击跳转申请 CRM（数据源在 Phase 2.1 已切到 Application）。
+
+### 数据库变化
+
+- 无（applications 表 Phase 1 已建；无新 migration）。
+
+### 测试 / lint / build
+
+- pytest：**131 passed**（新增 CRM 12 项：唯一性 409、404、非法跳转 409 含提示、终止态封死、
+  全字段更新、列表过滤/搜索/排序、按岗位查询、删除后岗位保留可重建、Dashboard 联动、extra=forbid）
+- vitest：9 passed；ruff：All checks passed；前端 build：通过
+- 浏览器端到端：详情页创建申请 → 流转到入围 → CRM 看板卡片就位 → 编辑 next action 保存生效。
+
+### 明确未实现
+
+- **Phase 6 风评聚合未实现**（Evidence UI/聚合/unknown scope 策略）。
+- Kanban 拖拽暂无乐观更新（失败由 invalidate 回滚）；申请状态无历史时间线（规格未要求，可作 Phase 7 增强）。
+- 批量重评、设置页可视化（Phase 7）。

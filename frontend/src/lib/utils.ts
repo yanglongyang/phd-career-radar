@@ -95,3 +95,50 @@ export const CONFIDENCE_LABELS: Record<string, string> = {
   medium: "可信度中",
   low: "可信度低",
 };
+
+// 申请 CRM 状态（ApplicationStatus）——14 态，看板列按此排列
+export const APPLICATION_STATUS_ORDER = [
+  "new", "reviewed", "shortlist", "contacting", "preparing", "applied",
+  "written_test", "interview_1", "interview_2", "hr", "offer",
+  "rejected", "withdrawn", "ignored",
+] as const;
+
+export const APPLICATION_STATUS_LABELS: Record<string, string> = {
+  new: "新申请",
+  reviewed: "已查看",
+  shortlist: "入围",
+  contacting: "洽联中",
+  preparing: "准备材料",
+  applied: "已投递",
+  written_test: "笔试",
+  interview_1: "一面",
+  interview_2: "二面",
+  hr: "HR 沟通",
+  offer: "Offer",
+  rejected: "已被拒",
+  withdrawn: "已撤回",
+  ignored: "已忽略",
+};
+
+export function applicationStatusTone(status: string) {
+  switch (status) {
+    case "offer":
+      return "green" as const;
+    case "rejected":
+    case "withdrawn":
+      return "red" as const;
+    case "ignored":
+      return "zinc" as const;
+    case "applied":
+    case "written_test":
+    case "interview_1":
+    case "interview_2":
+    case "hr":
+      return "blue" as const;
+    case "preparing":
+    case "contacting":
+      return "amber" as const;
+    default:
+      return "neutral" as const;
+  }
+}

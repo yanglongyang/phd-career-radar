@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/jobs", label: "岗位库" },
+  { to: "/applications", label: "申请 CRM" },
   { to: "/organizations", label: "单位库" },
   { to: "/settings", label: "设置" },
 ];
