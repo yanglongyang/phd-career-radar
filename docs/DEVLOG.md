@@ -494,3 +494,29 @@ Dashboard 流程计数在 Phase 2.1 已就位，本轮无新表/无 migration。
 
 - **Phase 6 风评聚合未实现**；Kanban 拖拽乐观更新、申请状态历史时间线（可选 Phase 7）、
   applied_at 显式编辑、批量重评与设置页（Phase 7）未实现。
+
+---
+
+## Phase 5.1 收尾 — Timestamp 序列化契约（2026-08-31 完成）
+
+第八轮审查发现的最后一处：SQLite 不保留 tzinfo，API 返回的 datetime 是 naive 字符串
+（如 `2026-08-30T17:00:00`），浏览器 `new Date()` 会误当本地时间——UTC+8 用户会把
+UTC 17:00（本地已是次日 01:00）错显示成当天。
+
+修复（纯前端契约，不碰数据库、不碰冻结的 Phase 2-4）：
+
+- `parseBackendTimestamp()`：**所有无时区标记的 timestamp 一律视为 UTC**（补 `Z` 解析）；
+  已带 `Z` / `±HH:MM` 偏移的时间戳（如未来切 PostgreSQL）原样解析，不重复追加。
+- `formatDate()` 接入：date-only（YYYY-MM-DD）原样展示；timestamp 按 UTC 契约解析后转
+  本地日历日；非法字符串保守原样返回。
+- vitest 纯函数测试 8 项（断言基于 toISOString/字符串比较，与运行机器时区无关）：
+  naive 按 UTC、Z 不重复追加、+08:00/+0800 正确换算、naive 与 Z 同一时刻、date-only 不偏移、
+  naive 与带 Z 展示一致、非法串原样、空值占位。
+
+### 数据库变化
+
+- 无。未来切 PostgreSQL 时 API 自带偏移量，正则自动识别，契约无需改动。
+
+### 测试 / lint / build
+
+- pytest：133 passed；vitest：**17 passed**（9 → 17）；ruff：All checks passed；前端 build：通过。

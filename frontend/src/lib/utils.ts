@@ -4,6 +4,16 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
+/**
+ * 后端时间戳契约（Phase 5.1 收尾）：SQLite 不保留 tzinfo，API 返回的
+ * datetime 字符串可能没有时区标记 —— **所有无时区的时间戳一律视为 UTC**。
+ * 已带 Z / ±HH:MM 偏移的时间戳（如未来切 PostgreSQL）原样解析，不重复追加。
+ */
+export function parseBackendTimestamp(value: string): Date {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return new Date(hasTimezone ? value : `${value}Z`);
+}
+
 function localCalendarDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -15,11 +25,12 @@ export function localToday(): string {
   return localCalendarDate(new Date());
 }
 
-/** date-only 字段（YYYY-MM-DD）原样展示；timestamp 明确转换为本地日历日。 */
+/** date-only 字段（YYYY-MM-DD）原样展示；timestamp 按 UTC 契约解析后转本地日历日；
+ *  非法字符串保守原样返回。 */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = new Date(value);
+  const d = parseBackendTimestamp(value);
   if (Number.isNaN(d.getTime())) return value;
   return localCalendarDate(d);
 }
