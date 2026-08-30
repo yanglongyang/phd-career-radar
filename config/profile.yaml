@@ -1,0 +1,27 @@
+# 个人 Profile 示例 — 以下内容全部为示例占位，请按个人实际情况修改。
+# 系统不会把任何个人偏好写死在代码里：改这里即可，不需要改评分代码。
+
+career_stage: phd_year4
+
+research_interests:
+  - organic chemistry
+  - fluorescent probes
+  - chemical biology
+
+skills:
+  - organic synthesis
+  - molecular design
+  - column chromatography
+  - HPLC
+  - NMR
+  - fluorescence spectroscopy
+  - computational chemistry
+
+# 硬性过滤条件（Hard Filters）— 触发任意一项时推荐等级置为 X
+# 不确定的信息（如薪资未知）不会触发过滤，只会进入 unknowns
+hard_filters:
+  unacceptable_regions: []   # 例：[某城市] —— 默认为空，由用户自行填写
+  minimum_salary: null       # 例：30（万元/年，需结合 salary_min/max 判断）
+  reject_pi_funded: false    # 排除 PI 经费聘用岗位
+  reject_postdoc: false      # 排除博士后岗位
+  reject_high_risk_tenure_track: false  # 排除高风险预聘/非升即走岗位

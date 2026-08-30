@@ -1,0 +1,45 @@
+# 评分配置 — 全部可修改，修改后可触发重新评估
+# 权重合计应为 100
+
+scoring:
+  fit: 20               # 岗位与个人匹配度
+  career_stability: 15  # 岗位性质与职业稳定性
+  research_resources: 15 # 科研平台与资源
+  region: 15            # 地区
+  compensation: 10      # 待遇
+  reputation: 10        # 风评与组织环境
+  workload: 5           # 教学与行政负担
+  long_term: 10         # 长期发展潜力
+
+# 推荐等级（S/A/B/C/D/X）不由 total_score 简单换算：
+# 先按分数落在阈值区间，再用风险/可信度封顶，硬性过滤触发时直接 X
+recommendation:
+  thresholds:           # total_score 下限
+    S: 85
+    A: 75
+    B: 65
+    C: 50
+  risk_cap:             # 风险等级对推荐等级的封顶
+    critical: D
+    high: C
+  confidence_cap:       # 信息可信度对推荐等级的封顶
+    low: B
+
+# 地区评分子维度权重（合计 15，对应上方 region 权重）
+region_sub_weights:
+  city_preference: 4    # 城市主观偏好
+  cost_of_living: 3     # 生活成本
+  research_ecosystem: 3 # 科研和产业生态
+  career_mobility: 3    # 未来职业流动性
+  life_quality: 2       # 城市综合生活因素
+
+# 地区层级基准分（0-100），具体城市归属见 regions.yaml
+region_tier_scores:
+  preferred: 90
+  acceptable: 70
+  neutral: 50
+  avoid: 20
+  unknown: 50
+
+# Dashboard “高匹配” 判定：推荐等级属于以下集合
+high_match_levels: [S, A]

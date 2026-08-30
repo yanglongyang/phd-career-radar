@@ -1,0 +1,11 @@
+# 招聘信息来源配置（Phase 7+ Collector 架构占位）
+# V0.1 使用手工新建 / 粘贴文本 / URL 三种导入方式，此文件暂不生效。
+
+collectors: []
+# 未来示例：
+#   - name: 某高校人才招聘网
+#     type: html_list
+#     enabled: false
+#     url: https://example.edu.cn/hr/
+#     job_categories: [university_faculty]
+#     schedule: daily
