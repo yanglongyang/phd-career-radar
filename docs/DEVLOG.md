@@ -367,3 +367,42 @@
 
 - **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合（Phase 6，
   含 unknown scope 的"情报线索 vs 计量输入"策略）未实现。
+
+---
+
+## Phase 4.1.1 收尾 — finalize 单一事实源（2026-08-31 完成）
+
+第七轮审查指出的最后一个底层不变量：`finalize_evaluation()` 此前仍信任调用方传入的
+`dimension_scores["region"]`、`dimension_scores["reputation"]` 与 `profile` 参数——
+正常编排路径正确，但未来批量重评等服务绕过 `evaluate_job()` 直接调用 finalize 时，
+仍可制造"快照说 A、落库是 B"的矛盾评估。本轮让 finalize 自身成为唯一可信边界：
+
+1. **region_score ← input_snapshot["region"]["score"]**：调用方传入的 region 分一律被
+   snapshot 值覆盖（测试：snapshot None + 调用方 80 → 落库 None；snapshot 80 + 调用方 999 → 落库 80）。
+2. **reputation 强制下沉到 finalize**：`input_snapshot["evidence"]` 为空时 finalize 自身
+   强制 reputation=null（测试：调用方传 80 → 落库 None），编排层不再承担该职责。
+3. **Profile / Hard Filters ← input_snapshot["profile"]**：删除 finalize 的 `profile` 参数
+   （彻底消除"快照是 A、参数是 B"的可能），`check_hard_filters` 与配置哈希审计全部使用
+   snapshot 中的 Profile（测试：snapshot 携带 reject_pi_funded 开关 → X 生效且
+   profile_hash 按快照 Profile A 计算）。
+
+至此完整不变量成立：
+
+> AI 实际输入 = input_snapshot = Evidence links = Region score 来源 = Profile/Hard Filters 来源 = 审计配置快照
+
+`test_finalize_computes_total_coverage_recommendation` 已按用户意见修正——不再人为通过
+dimension_scores 传 region=80（那是在锁定错误行为），改为 snapshot 的 region.score=80 并
+额外断言调用方误传 999 会被覆盖。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**120 passed**（新增三个收尾不变量测试）；vitest：9 passed；ruff：All checks passed；前端 build：通过。
+
+### 明确未实现
+
+- **Phase 5 Career CRM UI 未实现**；批量重评、input_snapshot 读取 API/UI、风评聚合与
+  unknown scope 策略（Phase 6）未实现。

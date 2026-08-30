@@ -66,18 +66,24 @@ def test_effective_risk_is_max_of_declared_and_items():
 
 def test_finalize_computes_total_coverage_recommendation(client, sample_job, db_session):
     """fit(20) + region(15) 已评分 → coverage = 35；
-    effective risk = max(high 声明, high 条目) = high → 85.7 阈值 S 被封顶到 C。"""
+    effective risk = max(high 声明, high 条目) = high → 85.7 阈值 S 被封顶到 C。
+    region 分来自 input_snapshot（Region Engine），即使调用方误传 region=999 也会被覆盖。"""
+    snapshot = {
+        **INPUT_SNAPSHOT,
+        "region": {"tier": "preferred", "score": 80},
+    }
     evaluation = finalize_evaluation(
         db_session,
         db_session.get(Job, sample_job["id"]),
         ai_output=_make_ai_output(risk_level="high", item_severity="high"),
-        dimension_scores={"fit": 90, "region": 80, "career_stability": None},
-        input_snapshot=INPUT_SNAPSHOT,
+        dimension_scores={"fit": 90, "region": 999, "career_stability": None},
+        input_snapshot=snapshot,
         provider_name="openai_compatible",
         model="test-model",
         prompt_version="job_evaluation_v1",
     )
     db_session.commit()
+    assert evaluation.region_score == 80.0  # snapshot 为准，999 被覆盖
     assert evaluation.total_score == 85.7
     assert evaluation.score_coverage == 35.0
     assert evaluation.recommendation_level == "C"  # 85.7 本应是 S，有效风险 high 封顶 C
@@ -384,9 +390,8 @@ def test_reject_high_risk_tenure_track_hard_filter(client, sample_job, db_sessio
         db_session,
         db_session.get(Job, sample_job["id"]),
         ai_output=_make_ai_output(risk_level="high", item_severity="high"),
-        dimension_scores={"fit": 90, "region": 80},
-        input_snapshot=INPUT_SNAPSHOT,
-        profile=profile,
+        dimension_scores={"fit": 90},
+        input_snapshot={**INPUT_SNAPSHOT, "profile": profile},
     )
     db_session.commit()
     assert evaluation.hard_filters_json == ["reject_high_risk_tenure_track"]
@@ -549,3 +554,63 @@ def test_department_scope_requires_both_sides_non_empty():
     assert not evidence_in_scope(job_no_dept, ev_named)       # job.department 为空
     assert not evidence_in_scope(job_no_dept, ev_no_name)     # 双方都空
     assert evidence_in_scope(job_with_dept, ev_named)         # 双方明确且一致
+
+
+def test_finalize_region_from_snapshot_overrides_dimension_scores(client, sample_job, db_session):
+    """Phase 4.1.1 收尾不变量：snapshot region=None 时，调用方传入的 region 分必须被覆盖为 None
+    —— finalize 是唯一可信边界，未来批量重评直接调用也无法绕过 Region Engine。"""
+    evaluation = finalize_evaluation(
+        db_session,
+        db_session.get(Job, sample_job["id"]),
+        ai_output=_make_ai_output(),
+        dimension_scores={"fit": 90, "region": 80},  # 调用方声称 region=80
+        input_snapshot=INPUT_SNAPSHOT,  # snapshot 的 region.score = None（unrated）
+    )
+    db_session.commit()
+    assert evaluation.region_score is None  # 不是 80
+    # 只有 fit 参与：total 90（归一化），coverage 20%
+    assert evaluation.total_score == 90.0
+    assert evaluation.score_coverage == 20.0
+
+
+def test_finalize_forces_reputation_null_without_evidence(client, sample_job, db_session):
+    """Phase 4.1.1 收尾不变量：snapshot evidence=[] 时，finalize 自身强制 reputation=null，
+    调用方传入 reputation=80 也无法落库。"""
+    evaluation = finalize_evaluation(
+        db_session,
+        db_session.get(Job, sample_job["id"]),
+        ai_output=_make_ai_output(),
+        dimension_scores={"fit": 90, "reputation": 80},  # 调用方声称 reputation=80
+        input_snapshot=INPUT_SNAPSHOT,  # snapshot evidence = []
+    )
+    db_session.commit()
+    assert evaluation.reputation_score is None  # 不是 80
+    assert evaluation.score_coverage == 20.0    # reputation 未参与 coverage
+
+
+def test_finalize_profile_and_hard_filters_come_from_snapshot(client, sample_job, db_session):
+    """Phase 4.1.1 收尾不变量：Profile / Hard Filters 以 input_snapshot["profile"] 为唯一事实源。
+    模型看到含 reject_pi_funded 开关的 Profile A，评估与审计都必须按 A 计算。"""
+    profile_a = {"hard_filters": {"reject_pi_funded": True}}
+    client.patch(
+        f"/api/jobs/{sample_job['id']}/academic-details",
+        json={"funding_source": "pi"},  # 正交维度：PI 经费聘用
+    )
+    job = db_session.get(Job, sample_job["id"])
+    job.job_category = "university_research"
+    db_session.commit()
+
+    evaluation = finalize_evaluation(
+        db_session,
+        job,
+        ai_output=_make_ai_output(),
+        dimension_scores={"fit": 90},
+        input_snapshot={**INPUT_SNAPSHOT, "profile": profile_a},
+    )
+    db_session.commit()
+    # Hard Filters 按 snapshot 的 Profile A 生效 → X
+    assert evaluation.hard_filters_json == ["reject_pi_funded"]
+    assert evaluation.recommendation_level == "X"
+    # 审计快照与哈希同样来自 snapshot 的 Profile A
+    assert evaluation.profile_snapshot_json == profile_a
+    assert evaluation.profile_hash == stable_json_hash(profile_a)

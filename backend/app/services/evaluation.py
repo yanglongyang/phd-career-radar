@@ -274,23 +274,18 @@ def evaluate_job(
     validate_input_snapshot(context)
     ai_output, prompt_version = provider.evaluate_job(context)
 
-    # 维度分确定性合成（Phase 4.1.1）：
-    # - region 维度已从 AI Schema 移除，只由 Region Engine（用户配置）决定；
-    # - 无可用 Evidence 时强制 reputation=null，不靠 Prompt 自觉。
+    # AI 只提供七个维度分；region/reputation/profile 等关键派生量全部由
+    # finalize_evaluation 以 input_snapshot 为唯一事实源强制（Phase 4.1.1）。
     scores = ai_output.scores.model_dump()
-    if not context["evidence"]:
-        scores["reputation"] = None
-    dimension_scores = {**scores, "region": context["region"]["score"]}
     evidence_ids = [e["id"] for e in context["evidence"]]
 
     return finalize_evaluation(
         db,
         job,
         ai_output=ai_output,
-        dimension_scores=dimension_scores,
+        dimension_scores=scores,
         evidence_ids=evidence_ids,
         input_snapshot=context,
-        profile=profile,
         provider_name=provider.name,
         model=getattr(provider, "model", None),
         prompt_version=prompt_version,
@@ -305,7 +300,6 @@ def finalize_evaluation(
     dimension_scores: dict[str, float | None],
     evidence_ids: list[int] | None = None,
     input_snapshot: dict,
-    profile: dict | None = None,
     provider_name: str | None = None,
     model: str | None = None,
     prompt_version: str | None = None,
@@ -313,18 +307,35 @@ def finalize_evaluation(
 ) -> JobEvaluation:
     """把 AI 的结构化判断与后端规则引擎的派生结果合成为一条可审计的评估记录。
 
-    dimension_scores 由调用方合成（AI 维度分 + 地区基准分等），本函数只做
-    确定性计算与持久化。任何一致性校验失败都会抛错拒绝保存，不静默降级。
+    **input_snapshot 是唯一事实源（Phase 4.1.1 最终不变量）**——本函数不信任
+    调用方传入的任何关键派生量：
+    - region_score ← input_snapshot["region"]["score"]（Region Engine / 用户配置）；
+    - 无 Evidence 时强制 reputation=null（snapshot["evidence"] 为空）；
+    - Profile 与 Hard Filters ← input_snapshot["profile"]（模型实际看到的版本）。
+
+    因此任何调用方（编排层、未来的批量重评服务等）都无法制造
+    "快照说 A、落库是 B"的矛盾评估。一致性校验失败直接拒绝保存。
     """
     validate_input_snapshot(input_snapshot)
     provided_ids = list(dict.fromkeys(evidence_ids or []))
     _validate_evidence_consistency(db, job, provided_ids, ai_output, input_snapshot)
 
-    snapshots = config_snapshots(profile)
+    # Profile / Hard Filters：模型实际看到的版本是唯一权威
+    effective_profile = input_snapshot["profile"] or {}
+    snapshots = config_snapshots(effective_profile)
     effective_risk = compute_effective_risk(ai_output)
-    hard_filter_hits = check_hard_filters(job, profile=profile, risk_level=effective_risk)
-    total = compute_total(dimension_scores)
-    coverage = compute_coverage(dimension_scores)
+    hard_filter_hits = check_hard_filters(
+        job, profile=effective_profile, risk_level=effective_risk
+    )
+
+    # Region 与 reputation 的最终值由 snapshot 决定，调用方传入的值一律覆盖
+    final_scores = dict(dimension_scores)
+    final_scores["region"] = (input_snapshot.get("region") or {}).get("score")
+    if not input_snapshot.get("evidence"):
+        final_scores["reputation"] = None
+
+    total = compute_total(final_scores)
+    coverage = compute_coverage(final_scores)
     recommendation = recommend_level(
         total,
         risk_level=effective_risk,
@@ -336,14 +347,14 @@ def finalize_evaluation(
         job_id=job.id,
         total_score=total,
         score_coverage=coverage,
-        fit_score=dimension_scores.get("fit"),
-        career_stability_score=dimension_scores.get("career_stability"),
-        research_resources_score=dimension_scores.get("research_resources"),
-        region_score=dimension_scores.get("region"),
-        compensation_score=dimension_scores.get("compensation"),
-        reputation_score=dimension_scores.get("reputation"),
-        workload_score=dimension_scores.get("workload"),
-        long_term_score=dimension_scores.get("long_term"),
+        fit_score=final_scores.get("fit"),
+        career_stability_score=final_scores.get("career_stability"),
+        research_resources_score=final_scores.get("research_resources"),
+        region_score=final_scores.get("region"),
+        compensation_score=final_scores.get("compensation"),
+        reputation_score=final_scores.get("reputation"),
+        workload_score=final_scores.get("workload"),
+        long_term_score=final_scores.get("long_term"),
         recommendation_level=recommendation,
         risk_level=effective_risk,  # backend 派生的有效风险，非 AI 原始声明
         confidence_level=ai_output.confidence,
@@ -359,7 +370,7 @@ def finalize_evaluation(
         model=model,
         prompt_version=prompt_version,
         evaluation_version=evaluation_version,
-        profile_snapshot_json=snapshots["profile"],
+        profile_snapshot_json=snapshots["profile"],  # = input_snapshot["profile"]
         profile_hash=snapshots["profile_hash"],
         scoring_config_snapshot_json=snapshots["scoring_config"],
         scoring_config_hash=snapshots["scoring_config_hash"],
