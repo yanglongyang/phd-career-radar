@@ -203,3 +203,41 @@
 - URL 导入为最简公开网页抓取，未针对任何具体招聘平台做适配（ Collector 属 Phase 7）。
 - 预览暂不逐字段展示"原文依据"高亮（unknowns 已标注；原文始终保留在 description_raw 与预览页）。
 - input_snapshot 的键结构强校验（profile/job/evidence/hard_filters/region 键）与"由评估服务自动构造快照"按审查意见归入 Phase 4。
+
+---
+
+## Phase 3.1 — Extraction Integrity Fixes（2026-08-30 完成）
+
+依据第三轮审查执行：修复"AI 预览里已正确解析的信息，在用户确认保存后丢失或串错"的三个 P0，以及 SSRF 边界、导入审计等。**Phase 3 由此冻结。**
+
+### P0 修复
+
+1. **Preview → Save 字段映射纯函数化（P0-1/P0-2）**：新增 `frontend/src/lib/extraction.ts` —— `seedValuesFromPreview()` 与 `buildSavePayload()` 共用同一张字段映射表（CORE_TEXT / DATE / AXIS / BOOL / NUMBER / ACADEMIC_TEXT 六组确定性键），按 Schema 逐字段类型转换（contract_years 保持 number、纯数字文本保持 string、四轴默认 unknown）。此前丢失的六个基本字段（country / posted_at / deadline / employment_type / degree_requirement / experience_requirement）全部进入 预览 UI → 保存 payload → 数据库。vitest 9 个测试覆盖"完整样例 → 不修改 → 保存 payload 逐字段核对"，并验证用户修改可覆盖 AI 结果。`npm test` 已加入 package.json。
+2. **URL provenance 串单修复（P0-3）**：`ExtractionPreviewOut` 新增 `source_type` / `source_url`，前端删除 `usedUrl` 状态 —— 保存时来源信息取自 Preview 本身，文本模式绝不可能残留上一次的 URL。配套 `import_audit.ingestion_method` 也由 preview 派生。
+
+### P1 修复
+
+3. **SSRF 边界**：`services/web.py` 重写 —— 目标主机必须解析到公网可路由 IP（`assert_public_host` 拒绝 loopback/私网/链路本地/保留地址），**每跳重定向都重新校验**（手动跟随，最多 5 跳）；流式下载限制 5MB。测试覆盖 6 类内网地址 + 3 个内网 URL。
+4. **大小限制**：粘贴正文与解析正文上限 100k 字符（`MAX_TEXT_CHARS`，超限 422"请缩小到具体招聘公告"）；网页下载上限 5MB。
+5. **JobImportRecord 导入审计**（新表 + migration `d281b97059b5`，roundtrip 已验证）：每次 AI 导入保存 ingestion_method / source_url / provider / model / prompt_version / **AI 原始解析输出（extraction_json）** / **用户确认后的最终 payload（confirmed_payload_json）** / source_text_hash。`JobCreate` 新增可选 `import_audit`，随岗位原子入库；"是 AI 解析的还是我手改的"从此可回答。前端保存时自动提交。
+
+### P1/P2 修复
+
+6. **Prompt ↔ Schema 一致性**：Prompt 补齐 country / employment_type / degree_requirement / experience_requirement；新增一致性测试（Schema 每个字段名必须出现在 Prompt 文本，position_nature / annual_salary 不得回流）。
+7. **annual_salary 删除**（孤立字段：AI 可生成但无持久化去向），Schema/Prompt/前端类型同步移除；salary_text / fixed_income / performance_income 已足够表达。
+8. **text/url 互斥**：`ExtractionRequest` model_validator 强制二选一，都不传或同时传都是 422。
+
+### 数据库变化 / Migration
+
+- 新表 `job_import_records`（migration `d281b97059b5_phase_3_1_job_import_audit`，前驱 4a48e7786118，upgrade/downgrade roundtrip 已验证）。其余无变化。
+
+### 测试 / lint / build
+
+- pytest：**106 passed**（新增 SSRF、互斥、超长、导入审计持久化、完整样例逐字段核对、Prompt 一致性）
+- vitest：**9 passed**（前端映射纯函数逐字段测试）
+- ruff：All checks passed；前端 npm run build：通过
+- 浏览器验证：导入页渲染正常；API 冒烟确认 both/neither 均返回 422
+
+### 明确未实现
+
+- **Phase 4 AI Evaluation 流程未实现**；导入审计暂无读取 API/UI（数据已完整入库）；URL 抓取仍未适配具体招聘平台（Collector 属 Phase 7）；DNS rebinding 的 TOCTOU 残余风险已用"每跳重校验"缓解，文档在此如实说明。

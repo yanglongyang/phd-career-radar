@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, extractPreview } from "../services/api";
-import type { ExtractionPreview, JobCreateInput, JobDetail } from "../types";
+import type { ExtractionPreview, JobDetail } from "../types";
+import { buildSavePayload, seedValuesFromPreview, type FieldValue } from "../lib/extraction";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, PageHeader, Select, Textarea } from "../components/ui";
 import {
   CONTRACT_TYPE_LABELS,
@@ -14,20 +15,11 @@ import {
 
 /* AI 解析导入（Phase 3）：粘贴/URL → AI 结构化预览 → 用户逐项确认/修正 → 原子保存 */
 
-type FieldValue = string | number | boolean | null;
-
 const AXIS_OPTIONS: Record<string, Record<string, string>> = {
   establishment_status: ESTABLISHMENT_LABELS,
   tenure_status: TENURE_LABELS,
   contract_type: CONTRACT_TYPE_LABELS,
   funding_source: FUNDING_SOURCE_LABELS,
-};
-
-const BOOL_FIELDS: Record<string, string> = {
-  is_up_or_out: "非升即走",
-  independent_pi: "独立 PI",
-  can_supervise_master: "硕士招生",
-  can_supervise_phd: "博士招生",
 };
 
 const LONG_FIELDS = new Set([
@@ -84,31 +76,6 @@ const ACADEMIC_GROUPS: GroupDef[] = [
   },
 ];
 
-const ALL_ACADEMIC_KEYS = [
-  ...Object.keys(AXIS_OPTIONS),
-  ...Object.keys(BOOL_FIELDS),
-  ...ACADEMIC_GROUPS.flatMap((g) => g.fields.map((f) => f.key)),
-];
-
-function seedValues(p: ExtractionPreview): Record<string, FieldValue> {
-  const e = p.extraction;
-  const values: Record<string, FieldValue> = {
-    title: e.title ?? "",
-    organization: e.organization ?? "",
-    department: e.department ?? "",
-    job_category: e.job_category,
-    province: e.province ?? "",
-    city: e.city ?? "",
-    salary_text: e.salary_text ?? "",
-    salary_currency: e.salary_currency ?? "",
-    salary_period: e.salary_period ?? "",
-  };
-  for (const key of ALL_ACADEMIC_KEYS) {
-    values[key] = (e as unknown as Record<string, FieldValue>)[key] ?? null;
-  }
-  return values;
-}
-
 export default function JobImportPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -117,7 +84,6 @@ export default function JobImportPage() {
   const [pageUrl, setPageUrl] = useState("");
   const [preview, setPreview] = useState<ExtractionPreview | null>(null);
   const [values, setValues] = useState<Record<string, FieldValue>>({});
-  const [usedUrl, setUsedUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [duplicateOf, setDuplicateOf] = useState<{ id: number; title: string } | null>(null);
 
@@ -125,14 +91,14 @@ export default function JobImportPage() {
     mutationFn: extractPreview,
     onSuccess: (data) => {
       setPreview(data);
-      setValues(seedValues(data));
+      setValues(seedValuesFromPreview(data));
       setErrorMsg(null);
     },
     onError: (err) => setErrorMsg(err.message),
   });
 
   const saveMutation = useMutation({
-    mutationFn: (payload: JobCreateInput) =>
+    mutationFn: (payload: ReturnType<typeof buildSavePayload>) =>
       api<JobDetail>("/jobs", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: (job) => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -154,46 +120,15 @@ export default function JobImportPage() {
   const extract = () => {
     setErrorMsg(null);
     setDuplicateOf(null);
-    if (source === "text") {
-      extractMutation.mutate({ text });
-    } else {
-      setUsedUrl(pageUrl);
-      extractMutation.mutate({ url: pageUrl });
-    }
+    // provenance 由后端 Preview 返回（source_type/source_url），前端不再单独维护 usedUrl
+    extractMutation.mutate(source === "text" ? { text } : { url: pageUrl });
   };
 
   const save = (allowDuplicate: boolean) => {
     if (!preview) return;
     setErrorMsg(null);
     setDuplicateOf(null);
-    const str = (v: FieldValue) => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
-    const bool = (v: FieldValue) => (typeof v === "boolean" ? v : null);
-    const num = (v: FieldValue) => {
-      if (typeof v !== "string" || v.trim() === "") return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-    const academic: Record<string, FieldValue> = {};
-    for (const key of ALL_ACADEMIC_KEYS) {
-      academic[key] = key in AXIS_OPTIONS ? (values[key] as string) ?? "unknown" : key in BOOL_FIELDS ? bool(values[key]) : num(values[key]) ?? str(values[key]);
-    }
-    const payload: JobCreateInput = {
-      title: str(values.title) ?? "",
-      organization_name: str(values.organization),
-      department: str(values.department),
-      job_category: (values.job_category as string) || "other",
-      province: str(values.province),
-      city: str(values.city),
-      salary_text: str(values.salary_text),
-      salary_currency: str(values.salary_currency),
-      salary_period: str(values.salary_period),
-      description_raw: preview.source_text,
-      source_url: usedUrl,
-      status: "new",
-      academic_details: academic,
-      allow_duplicate: allowDuplicate,
-    };
-    saveMutation.mutate(payload);
+    saveMutation.mutate(buildSavePayload(preview, values, { allowDuplicate }));
   };
 
   const bind = (key: string) => ({
@@ -282,7 +217,7 @@ export default function JobImportPage() {
               <span>Provider：{preview.provider}</span>
               <span>模型：{preview.model ?? "—"}</span>
               <span>Prompt：{preview.prompt_version}</span>
-              {usedUrl && <span>来源链接：{usedUrl}</span>}
+              <span>来源：{preview.source_type === "url" ? "链接抓取" : "粘贴文本"}</span>
               <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
                 ← 重新输入
               </Button>
@@ -330,6 +265,26 @@ export default function JobImportPage() {
               <Field label="待遇（原文）">
                 <Input {...bind("salary_text")} />
               </Field>
+              <Field label="国家 / 地区">
+                <Input {...bind("country")} />
+              </Field>
+              <Field label="用工类型（未知则留空）">
+                <Input {...bind("employment_type")} />
+              </Field>
+              <Field label="发布日期">
+                <Input type="date" {...bind("posted_at")} />
+              </Field>
+              <Field label="截止日期（重要，未知则留空）">
+                <Input type="date" {...bind("deadline")} />
+              </Field>
+              <Field label="学历要求（未知则留空）">
+                <Input {...bind("degree_requirement")} />
+              </Field>
+              <div className="col-span-2">
+                <Field label="经验要求（未知则留空）">
+                  <Input {...bind("experience_requirement")} />
+                </Field>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="币种">
                   <Select {...bind("salary_currency")}>

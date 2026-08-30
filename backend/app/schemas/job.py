@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.academic import AcademicJobDetailsOut, AcademicJobDetailsUpdate
 from app.schemas.evaluation import JobEvaluationOut
+from app.schemas.extraction import ImportAuditIn
 from app.schemas.organization import OrganizationBrief
 
 JobCategoryLiteral = Literal[
@@ -80,6 +81,9 @@ class JobCreate(BaseModel):
 
     # AI 解析确认后随岗位原子入库（Phase 3）；手工新建可不传
     academic_details: AcademicJobDetailsUpdate | None = None
+
+    # AI 导入审计（Phase 3.1）：AI 流程保存时必传，手工新建不传
+    import_audit: ImportAuditIn | None = None
 
     allow_duplicate: bool = False  # 去重冲突时由用户确认仍要创建
 

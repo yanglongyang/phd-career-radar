@@ -18,3 +18,8 @@ def stable_json_hash(data: dict | list | None) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def sha256_text(text: str) -> str:
+    """对原始文本计算 SHA-256（UTF-8），用于导入审计的 source_text_hash。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

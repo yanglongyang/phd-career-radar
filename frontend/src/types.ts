@@ -162,7 +162,17 @@ export interface JobCreateInput {
   source_url?: string | null;
   status?: string;
   academic_details?: Partial<AcademicJobDetails> | null;
+  import_audit?: ImportAuditInput | null;
   allow_duplicate?: boolean;
+}
+
+export interface ImportAuditInput {
+  ingestion_method: "text" | "url" | "manual";
+  source_url: string | null;
+  provider: string | null;
+  model: string | null;
+  prompt_version: string | null;
+  extraction_json: Record<string, unknown> | null;
 }
 
 export interface JobExtraction {
@@ -204,7 +214,6 @@ export interface JobExtraction {
   can_supervise_phd: boolean | null;
   master_quota: string | null;
   phd_quota: string | null;
-  annual_salary: string | null;
   fixed_income: string | null;
   performance_income: string | null;
   housing_settlement: string | null;
@@ -215,6 +224,8 @@ export interface JobExtraction {
 }
 
 export interface ExtractionPreview {
+  source_type: "text" | "url";
+  source_url: string | null;
   source_text: string;
   extraction: JobExtraction;
   provider: string;

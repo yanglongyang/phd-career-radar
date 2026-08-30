@@ -82,7 +82,6 @@ class JobExtractionOut(BaseModel):
     can_supervise_phd: bool | None = None         # 博士招生资格
     master_quota: str | None = None               # 硕士指标
     phd_quota: str | None = None                  # 博士指标
-    annual_salary: str | None = None              # 年薪
     fixed_income: str | None = None               # 固定收入
     performance_income: str | None = None         # 绩效收入
     housing_settlement: str | None = None         # 安家费

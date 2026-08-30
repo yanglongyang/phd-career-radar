@@ -13,7 +13,16 @@ from app.core.fingerprint import (
     job_fingerprint,
     normalize_org_name,
 )
-from app.models import AcademicJobDetails, Evidence, Job, JobEvaluation, JobVersion, Organization
+from app.core.hash import sha256_text
+from app.models import (
+    AcademicJobDetails,
+    Evidence,
+    Job,
+    JobEvaluation,
+    JobImportRecord,
+    JobVersion,
+    Organization,
+)
 from app.schemas.academic import AcademicJobDetailsUpdate
 from app.schemas.job import JobCreate, JobUpdate
 
@@ -141,13 +150,30 @@ def create_job(db: Session, payload: JobCreate) -> tuple[Job, Job | None]:
         first_seen_at=_now(),
         last_seen_at=_now(),
     )
+    db.add(job)
+    db.flush()  # 先拿到 job.id，嵌套的学术详情与导入审计都挂到它上面
     if payload.academic_details is not None:
         details = AcademicJobDetails(job_id=job.id)
         apply_academic_details(details, payload.academic_details)
         job.academic_details = details
         db.add(details)
-    db.add(job)
-    db.flush()
+    if payload.import_audit is not None:
+        db.add(
+            JobImportRecord(
+                job_id=job.id,
+                ingestion_method=payload.import_audit.ingestion_method,
+                source_url=payload.import_audit.source_url,
+                provider=payload.import_audit.provider,
+                model=payload.import_audit.model,
+                prompt_version=payload.import_audit.prompt_version,
+                extraction_json=payload.import_audit.extraction_json,
+                # mode="json"：date 等类型转为 JSON 兼容值，JSON 列才能存
+                confirmed_payload_json=payload.model_dump(
+                    exclude={"import_audit", "allow_duplicate"}, mode="json"
+                ),
+                source_text_hash=sha256_text(payload.description_raw or ""),
+            )
+        )
     return job, duplicate
 
 

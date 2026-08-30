@@ -11,7 +11,7 @@ from app.models import JobEvaluation
 from app.models.academic_job_details import AcademicJobDetails
 from app.schemas.academic import AcademicJobDetailsOut, AcademicJobDetailsUpdate
 from app.schemas.evaluation import JobEvaluationOut
-from app.schemas.extraction import ExtractionPreviewOut, ExtractionRequest
+from app.schemas.extraction import MAX_TEXT_CHARS, ExtractionPreviewOut, ExtractionRequest
 from app.schemas.job import (
     JobCreate,
     JobDetailOut,
@@ -262,16 +262,20 @@ def extract_preview(
     用户在预览中逐项确认/修正后，通过 POST /api/jobs（含嵌套 academic_details）
     原子保存。解析失败或 AI 未配置时给出明确错误，不伪造结果。"""
     # 请求校验（422）→ AI 配置检查（503）→ AI 调用错误（502），失败快速且语义明确
+    source_type = "url" if payload.text is None else "text"
     text = payload.text
     if text is None:
-        if not payload.url:
-            raise HTTPException(status_code=422, detail="请提供公告全文（text）或链接（url）")
         try:
-            text = fetch_url_text(payload.url)
+            text = fetch_url_text(payload.url)  # type: ignore[arg-type]
         except PageFetchError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
     if len(text.strip()) < 50:
         raise HTTPException(status_code=422, detail="公告正文过短（少于 50 字符），请检查内容")
+    if len(text) > MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"正文过长（{len(text)} 字符，上限 {MAX_TEXT_CHARS}），请缩小到具体招聘公告",
+        )
     if provider is None:
         raise HTTPException(
             status_code=503,
@@ -282,6 +286,9 @@ def extract_preview(
     except AIError as e:
         raise HTTPException(status_code=502, detail=f"AI 解析失败：{e}") from e
     return ExtractionPreviewOut(
+        # provenance 随预览返回：前端保存时以此为准，避免来源串单
+        source_type=source_type,
+        source_url=payload.url if source_type == "url" else None,
         source_text=text.strip(),
         extraction=extraction,
         provider=provider.name,

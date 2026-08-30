@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.application import Application
     from app.models.evaluation import JobEvaluation
     from app.models.evidence import Evidence
+    from app.models.job_import_record import JobImportRecord
     from app.models.job_version import JobVersion
     from app.models.organization import Organization
 
@@ -86,6 +87,9 @@ class Job(Base):
     evidence: Mapped[list["Evidence"]] = relationship(back_populates="job")
     applications: Mapped[list["Application"]] = relationship(back_populates="job", cascade="all, delete-orphan")
     versions: Mapped[list["JobVersion"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    import_records: Mapped[list["JobImportRecord"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
 
     @property
     def latest_evaluation(self) -> "JobEvaluation | None":
