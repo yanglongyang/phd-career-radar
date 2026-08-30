@@ -8,7 +8,7 @@ Phase 2.1 权责划分：AI 只做事实判断（维度分数、风险、信息�
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Score = int
 
@@ -29,6 +29,8 @@ ReputationTopicLiteral = Literal[
 
 class JobExtractionOut(BaseModel):
     """粘贴/抓取的招聘公告 → 结构化岗位。公告未提及的字段必须为 null，不得猜测。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str
     organization: str | None = None
@@ -93,6 +95,8 @@ class JobExtractionOut(BaseModel):
 
 
 class EvaluationScores(BaseModel):
+
+    model_config = ConfigDict(extra="forbid")
     fit: Score | None = None
     career_stability: Score | None = None
     research_resources: Score | None = None
@@ -113,6 +117,8 @@ class EvaluationScores(BaseModel):
 class RiskItem(BaseModel):
     """结构化风险条目：severity 供后端规则引擎使用，evidence_ids 指向依据。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: str
     severity: Literal["low", "medium", "high", "critical"]
     reason: str
@@ -121,6 +127,8 @@ class RiskItem(BaseModel):
 
 class JobEvaluationOut(BaseModel):
     """AI 岗位评估输出（Phase 2.1 契约）。
+
+    model_config = ConfigDict(extra="forbid")
 
     注意：不包含 recommendation_level / total_score / score_coverage，
     它们由后端 deterministic 规则引擎从 scores + risk + hard_filters 派生。
@@ -137,6 +145,8 @@ class JobEvaluationOut(BaseModel):
     questions_to_ask: list[str] = Field(default_factory=list)
     confidence: Literal["low", "medium", "high"] = "medium"
 
+    model_config = ConfigDict(extra="forbid")
+
     @field_validator("scores", mode="before")
     @classmethod
     def _scores_must_be_object(cls, v):
@@ -147,6 +157,8 @@ class JobEvaluationOut(BaseModel):
 
 class ReputationTopicOut(BaseModel):
     """风评聚合的单主题结论：不输出绝对化判断，逐主题给出正/负来源数与证据等级。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     topic: ReputationTopicLiteral
     positive_sources: int = Field(ge=0)
@@ -159,6 +171,8 @@ class ReputationTopicOut(BaseModel):
 
 
 class ReputationSummaryOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     topics: list[ReputationTopicOut] = Field(default_factory=list)
     overall_note: str = ""
     confidence: Literal["low", "medium", "high"] = "low"

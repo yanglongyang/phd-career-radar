@@ -16,6 +16,17 @@ class RiskItemOut(BaseModel):
     evidence_ids: list[int] = Field(default_factory=list)
 
 
+class EvaluationEvidenceBrief(BaseModel):
+    """本次评估实际使用的证据摘要（Evaluation Audit 展示用）。"""
+
+    id: int
+    claim: str
+    evidence_level: str
+    source_type: str | None = None
+    scope_level: str | None = None
+    stance: str | None = None
+
+
 class JobEvaluationOut(BaseModel):
     id: int
     job_id: int
@@ -50,6 +61,12 @@ class JobEvaluationOut(BaseModel):
     model: str | None = None
     evaluated_at: datetime
 
+    # ---- Evaluation Audit（Phase 4）----
+    profile_hash: str | None = None
+    scoring_config_hash: str | None = None
+    region_config_hash: str | None = None
+    evidence_items: list[EvaluationEvidenceBrief] = Field(default_factory=list)
+
     @classmethod
     def from_model(cls, e: "JobEvaluation") -> "JobEvaluationOut":
         return cls(
@@ -83,4 +100,18 @@ class JobEvaluationOut(BaseModel):
             prompt_version=e.prompt_version,
             model=e.model,
             evaluated_at=e.evaluated_at,
+            profile_hash=e.profile_hash,
+            scoring_config_hash=e.scoring_config_hash,
+            region_config_hash=e.region_config_hash,
+            evidence_items=[
+                EvaluationEvidenceBrief(
+                    id=link.evidence.id,
+                    claim=link.evidence.claim,
+                    evidence_level=link.evidence.evidence_level,
+                    source_type=link.evidence.source_type,
+                    scope_level=link.evidence.scope_level,
+                    stance=link.evidence.stance,
+                )
+                for link in e.evidence_links
+            ],
         )

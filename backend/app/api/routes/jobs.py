@@ -22,6 +22,7 @@ from app.schemas.job import (
     JobVersionOut,
 )
 from app.schemas.organization import OrganizationBrief
+from app.services import evaluation as evaluation_service
 from app.services import jobs as job_service
 from app.services.web import PageFetchError, fetch_url_text
 
@@ -297,16 +298,31 @@ def extract_preview(
     )
 
 
-@router.post("/{job_id}/evaluate")
-def evaluate_job(job_id: int, db: Session = Depends(get_db), provider=Depends(get_ai_provider)):
-    """Phase 4 接入。此处先给出明确的不可用状态，避免静默伪造评估。"""
+@router.post("/{job_id}/evaluate", response_model=JobEvaluationOut)
+def evaluate_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    provider=Depends(get_ai_provider),
+):
+    """AI 评估（Phase 4）：后端构造 context → 调 AI → 规则引擎 finalize → 入库。
+
+    同一份 context 既发给模型也存为 input_snapshot（可复现）；评估数据不一致时
+    拒绝保存（409），AI 未配置 503，AI 调用/输出失败 502 —— 不伪造结果。"""
     try:
-        job_service.get_job_or_404(db, job_id)
+        job = job_service.get_job_or_404(db, job_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     if provider is None:
         raise HTTPException(
             status_code=503,
-            detail="AI 未配置：请在 .env 中设置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL",
+            detail="AI 未配置：请在 .env 中设置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 后重试",
         )
-    raise HTTPException(status_code=503, detail="AI 评估将在 Phase 4 提供（Provider 与规则引擎已就绪）")
+    try:
+        evaluation = evaluation_service.evaluate_job(db, job, provider)
+    except AIError as e:
+        raise HTTPException(status_code=502, detail=f"AI 评估失败：{e}") from e
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    db.commit()
+    db.refresh(evaluation)
+    return JobEvaluationOut.from_model(evaluation)

@@ -21,7 +21,7 @@
 - `organization` / `department`：单位与院系
 - `job_category`：`university_faculty`（高校教学科研岗）/ `university_research`（高校专职科研）/ `postdoc` / `research_institute` / `industry_rnd` / `other`
 - `province` / `city`：工作地点
-- `salary_text`：待遇原文（保留"万元/年"等单位表述）；`salary_currency`：`CNY` / `USD` / `unknown`；`salary_period`：`year` / `month` / `unknown`
+- `salary_text`：待遇原文（保留"万元/年"等单位表述）；`salary_currency`：`CNY` / `USD` / `EUR` / `GBP` / `unknown`；`salary_period`：`year` / `month` / `day` / `hour` / `unknown`
 - `country`：国家/地区（如 中国）
 - `employment_type`：用工类型（全职/兼职等），公告未提及为 null
 - `degree_requirement` / `experience_requirement`：学历要求与经验要求

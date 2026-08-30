@@ -67,3 +67,7 @@ export async function extractPreview(payload: {
 }): Promise<import("../types").ExtractionPreview> {
   return api("/jobs/extract-preview", { method: "POST", body: JSON.stringify(payload) });
 }
+
+export async function evaluateJob(jobId: number): Promise<import("../types").Evaluation> {
+  return api(`/jobs/${jobId}/evaluate`, { method: "POST" });
+}

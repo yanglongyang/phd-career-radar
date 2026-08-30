@@ -1,6 +1,7 @@
 """AI 导入审计（Phase 3.1）。
 
-记录一次岗位导入的完整 provenance：来源方式、AI 解析原始输出（未经用户修改）、
+记录一次岗位导入的完整 provenance：来源方式、AI 结构化解析结果（经 Pydantic 校验后的
+normalized 输出，即用户修改前的版本；LLM 的原始响应文本不在 V0.1 持久化范围）、
 用户确认后的最终 payload、模型与 Prompt 版本、正文哈希。
 没有这条记录，"这些字段是 AI 解析的还是我手改的"将永远无法回答。
 """
@@ -26,7 +27,7 @@ class JobImportRecord(Base):
     model: Mapped[str | None] = mapped_column(String(128))
     prompt_version: Mapped[str | None] = mapped_column(String(64))
 
-    extraction_json: Mapped[dict | None] = mapped_column(JSON)        # AI 原始解析输出
+    extraction_json: Mapped[dict | None] = mapped_column(JSON)        # AI 结构化解析结果（校验后、用户修改前）
     confirmed_payload_json: Mapped[dict | None] = mapped_column(JSON)  # 用户确认后的最终 payload
     source_text_hash: Mapped[str | None] = mapped_column(String(64))   # SHA-256(description_raw)
 

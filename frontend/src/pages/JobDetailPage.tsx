@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api } from "../services/api";
+import { api, evaluateJob } from "../services/api";
 import type { JobDetail } from "../types";
 import {
   Badge,
@@ -87,6 +87,16 @@ export default function JobDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["job", id] });
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+
+  const evaluateMutation = useMutation({
+    mutationFn: () => evaluateJob(Number(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["job", id] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      setTab("evaluation");
     },
   });
 
@@ -259,7 +269,7 @@ export default function JobDetailPage() {
           ) : (
             <EmptyState
               title="尚未进行 AI 评估"
-              hint="评估能力将在 Phase 4 接入：Profile + Job + Evidence → 结构化评估。"
+              hint="切换到 AI Evaluation 页签开始评估。"
             />
           )
         )}
@@ -281,14 +291,69 @@ export default function JobDetailPage() {
         )}
 
         {tab === "evaluation" && (
-          evaluation ? (
+          !evaluation ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-10">
+                <p className="text-sm text-zinc-500">尚未进行 AI 评估</p>
+                <p className="text-xs text-zinc-400">
+                  评估流程：后端构造输入快照（Profile + 岗位 + 地区 + Evidence + Hard Filters）→
+                  同一份内容发给模型并存档 → 规则引擎计算总分/覆盖度/推荐等级。
+                </p>
+                {evaluateMutation.isPending && <p className="text-sm">评估中…（约需十几秒）</p>}
+                {evaluateMutation.isError && (
+                  <div className="max-w-lg rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
+                    {evaluateMutation.error.message}
+                  </div>
+                )}
+                <Button onClick={() => evaluateMutation.mutate()} disabled={evaluateMutation.isPending}>
+                  开始 AI 评估
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
             <div className="grid grid-cols-2 gap-4">
               <Card className="col-span-2">
                 <CardHeader className="flex items-center justify-between">
+                  <CardTitle>本次评价依据（Evaluation Audit）</CardTitle>
+                  <Button size="sm" variant="outline" onClick={() => evaluateMutation.mutate()} disabled={evaluateMutation.isPending}>
+                    重新评估
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2 text-xs text-zinc-600 dark:text-zinc-400">
+                  <div className="flex flex-wrap gap-x-6 gap-y-1">
+                    <span>Provider：{evaluation.provider ?? "—"}</span>
+                    <span>模型：{evaluation.model ?? "—"}</span>
+                    <span>Prompt：{evaluation.prompt_version ?? "—"}</span>
+                    <span>评估时间：{formatDate(evaluation.evaluated_at)}</span>
+                    <span>覆盖度：{evaluation.score_coverage ?? "—"}%</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 font-mono">
+                    <span>profile {evaluation.profile_hash?.slice(0, 12) ?? "—"}</span>
+                    <span>scoring {evaluation.scoring_config_hash?.slice(0, 12) ?? "—"}</span>
+                    <span>region {evaluation.region_config_hash?.slice(0, 12) ?? "—"}</span>
+                  </div>
+                  <div>
+                    <p className="mt-1 font-medium text-zinc-700 dark:text-zinc-300">使用的 Evidence（{evaluation.evidence_items.length}）：</p>
+                    {evaluation.evidence_items.length > 0 ? (
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        {evaluation.evidence_items.map((ev) => (
+                          <li key={ev.id}>
+                            <Badge tone={ev.evidence_level === "A" ? "green" : ev.evidence_level === "B" ? "blue" : "zinc"}>
+                              {ev.evidence_level}
+                            </Badge>{" "}
+                            #{ev.id} {ev.claim}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1">本次评估没有可用证据（风评维度将以 null 呈现，不猜测）。</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="col-span-2">
+                <CardHeader className="flex items-center justify-between">
                   <CardTitle>八维评分</CardTitle>
-                  <span className="text-xs text-zinc-400">
-                    模型：{evaluation.model ?? "—"} · Prompt：{evaluation.prompt_version ?? "—"} · {formatDate(evaluation.evaluated_at)}
-                  </span>
                 </CardHeader>
                 <CardContent className="grid grid-cols-2 gap-x-8 gap-y-4">
                   <ScoreBar label="岗位与个人匹配度" score={evaluation.fit_score} />
@@ -326,8 +391,6 @@ export default function JobDetailPage() {
                 </CardContent>
               </Card>
             </div>
-          ) : (
-            <EmptyState title="尚未进行 AI 评估" hint="评估能力将在 Phase 4 接入。" />
           )
         )}
 

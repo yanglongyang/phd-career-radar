@@ -82,6 +82,17 @@ export interface Evaluation {
   prompt_version: string | null;
   model: string | null;
   evaluated_at: string;
+  profile_hash: string | null;
+  scoring_config_hash: string | null;
+  region_config_hash: string | null;
+  evidence_items: {
+    id: number;
+    claim: string;
+    evidence_level: string;
+    source_type: string | null;
+    scope_level: string | null;
+    stance: string | null;
+  }[];
 }
 
 export interface JobListItem {

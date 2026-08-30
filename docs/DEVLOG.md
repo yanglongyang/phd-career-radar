@@ -241,3 +241,57 @@
 ### 明确未实现
 
 - **Phase 4 AI Evaluation 流程未实现**；导入审计暂无读取 API/UI（数据已完整入库）；URL 抓取仍未适配具体招聘平台（Collector 属 Phase 7）；DNS rebinding 的 TOCTOU 残余风险已用"每跳重校验"缓解，文档在此如实说明。
+
+---
+
+## Phase 4 — AI Evaluation（2026-08-30 完成）
+
+按审查要求的顺序实现：Step 0 硬化 → Step 1 Context → Step 2 AI 调用 → Step 3 确定性 finalize → Step 4 审计 UI。**评估从第一天起即可复现、可审计。**
+
+### Step 0 硬化（含上轮遗留尾巴）
+
+- 全部 AI 输出 Schema（JobExtractionOut / EvaluationScores / RiskItem / JobEvaluationOut / ReputationTopicOut / ReputationSummaryOut）`extra="forbid"`：模型多输出任何字段（如已删除的 annual_salary）都会触发校验失败并自动重试一次，不再被静默吞掉。
+- input_snapshot 强校验：必须是非空 dict 且含 `profile / job / region / evidence / hard_filters` 五键，缺任何键拒绝保存。
+- Evidence 作用域校验：用于评估的证据必须属于当前岗位或其单位，跨单位证据 → 409 拒绝。
+- Extraction Prompt 枚举对齐 Schema（EUR/GBP、day/hour）；`job_import_records.extraction_json` 文档措辞修正为"经 Pydantic 校验后的 normalized 输出（用户修改前）"。
+
+### Step 1 Context（同一份内容，两条去向）
+
+`build_evaluation_context(db, job)` 自动构造真实 AI 输入五键 dict：
+- `profile`：config/profile.yaml 快照
+- `job`：岗位结构化信息 + 高校四轴事实
+- `region`：地区层级 + 基准分（unrated → null，不猜测）
+- `evidence`：作用域内证据（含等级/立场/第一手/独立来源键，供风评维度参考）
+- `hard_filters`：用户硬性过滤配置
+
+**同一份 dict 既作为 user message 发给模型，又原样存入 `input_snapshot_json`** —— 数据库里保存的和模型实际看到的保证一致（测试断言 `provider.seen_contexts == [evaluation.input_snapshot_json]`）。
+
+### Step 2+3 AI 调用与确定性落库
+
+- `POST /api/jobs/{id}/evaluate`：Provider 注入（未配置 503）→ `evaluate_job()` 编排 → AI 输出（Pydantic 校验 + 重试一次）→ region 维度合成（AI 分优先，缺失时用地区基准分）→ `finalize_evaluation()` 确定性计算（effective risk / provisional total / score_coverage / hard filters → recommendation）→ JobEvaluation + EvaluationEvidence 同事务落库。
+- 错误语义：请求/作用域/快照问题 409，AI 未配置 503，AI 调用或输出失败 502 —— 不伪造结果。
+- 权责不变：AI 只产出维度分/风险/信息缺口/置信度；推荐等级只由后端规则引擎计算。
+
+### Step 4 审计 UI
+
+详情页 AI Evaluation 页签：
+- 未评估时显示"开始 AI 评估"按钮与流程说明；AI 未配置时透明显示 503 错误。
+- 评估后新增 **"本次评价依据（Evaluation Audit）"卡片**：Provider/模型/Prompt 版本/评估时间/覆盖度、profile/scoring/region 三个配置哈希、使用的 Evidence 清单（等级 + 编号 + 主张；无证据时明确说明"风评维度将以 null 呈现，不猜测"）；并提供"重新评估"。
+- API 输出增加 `profile_hash / scoring_config_hash / region_config_hash / evidence_items`。
+
+### 数据库变化
+
+- 无新表/新列（审计结构在 Phase 2.1 已就绪，本轮直接启用）；无新 migration。
+
+### 测试 / lint / build
+
+- pytest：**110 passed**（新增：五键快照校验、跨单位证据拒绝、region 基准分合成、evaluate_job 全链路审计断言、AI Schema forbid、作用域构造）
+- vitest：9 passed；ruff：All checks passed；前端 build：通过
+- 浏览器验证：Evaluation 页签评估入口与 AI 未配置透明报错（503）。
+
+### 明确未实现
+
+- **Phase 5 Career CRM UI 未实现**（Application 模型与 Dashboard 统计已就绪）。
+- 批量重评（修改权重后一键重评全部岗位）未实现——单岗位"重新评估"已可用，批量属 Phase 7 设置页。
+- input_snapshot 的读取 API/UI（当前数据完整入库，展示配置哈希即可满足 V0.1 审计）。
+- 风评聚合（ReputationSummary 调用）未接入流程，属 Phase 6。

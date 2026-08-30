@@ -1,34 +1,36 @@
-"""评估规则引擎（Phase 2.1/2.1.1，Phase 4 接入用）。
+"""AI 岗位评估编排（Phase 4）。
 
-职责划分（唯一权威来源）：
-- AI 输出：维度分数、risk_level/risk_items、unknowns、confidence —— 事实判断。
-- 本模块（deterministic backend）：effective risk、total_score(provisional)、
-  score_coverage、hard_filters、recommendation_level —— 最终等级只能由这里计算。
+流程与权责：
+1. `build_evaluation_context()`：由后端自动构造真实 AI 输入（profile/job/region/
+   evidence/hard_filters 五键）—— 同一份 dict 既发给模型、又原样存入
+   input_snapshot，保证"数据库里保存的和模型实际看到的是同一份东西"。
+2. `evaluate_job()`：调 provider（Pydantic 校验 + 失败重试一次）→ region 维度
+   合成（AI 分优先，缺失时用地区基准分）→ `finalize_evaluation()` 确定性落库。
+3. `finalize_evaluation()`（deterministic backend）：effective risk、
+   total_score(provisional)、score_coverage、hard_filters、recommendation_level
+   —— 最终等级只能由这里计算。
 
-Phase 2.1.1 一致性强约束：
-- effective_risk = max(AI 声明 risk_level, 各 risk_items.severity)，防止
-  "条目 critical 但 overall medium" 绕过封顶；推荐等级使用 effective_risk。
-- risk_items.evidence_ids ⊆ 本次 evaluation evidence_ids ⊆ 数据库真实存在的
-  Evidence。任何引用脱离本次评估的证据 → 拒绝保存，保证结论可追溯。
-- input_snapshot 为必填：任何 AI 评估必须保存完整输入快照，否则无法复现。
-
-本模块不发起任何 AI 调用；真实的 "调 AI → 校验 → finalize" 流程在 Phase 4 实现。
+本模块不直接发 HTTP；Provider 由调用方注入，测试可注入 FakeProvider。
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.ai.provider import LLMProvider
 from app.ai.schemas import JobEvaluationOut as AIEvaluationOut
 from app.core.config import get_profile_config, get_regions_config, get_scoring_config
 from app.core.hash import stable_json_hash
-from app.models import Evidence, Job, JobEvaluation
+from app.models import Evidence, Job, JobEvaluation, JobImportRecord  # noqa: F401
 from app.models.evaluation_evidence import EvaluationEvidence
 from app.services.hard_filters import check_hard_filters
+from app.services.regions import get_region_score, get_region_tier
 from app.services.scoring import compute_coverage, compute_total, recommend_level
 
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+REQUIRED_SNAPSHOT_KEYS = {"profile", "job", "region", "evidence", "hard_filters"}
 
 
 def compute_effective_risk(ai_output: AIEvaluationOut) -> str:
@@ -55,6 +57,198 @@ def config_snapshots(profile: dict | None = None) -> dict:
     }
 
 
+def _job_context_dict(job: Job) -> dict:
+    """岗位结构化信息（含高校四轴事实）→ AI 可读 dict。"""
+    details = job.academic_details
+    academic = {}
+    if details is not None:
+        academic = {
+            "establishment_status": details.establishment_status,
+            "tenure_status": details.tenure_status,
+            "contract_type": details.contract_type,
+            "funding_source": details.funding_source,
+            "contract_years": details.contract_years,
+            "is_up_or_out": details.is_up_or_out,
+            "midterm_review": details.midterm_review,
+            "final_review": details.final_review,
+            "publication_requirements": details.publication_requirements,
+            "grant_requirements": details.grant_requirements,
+            "teaching_requirements": details.teaching_requirements,
+            "admin_requirements": details.admin_requirements,
+            "current_title": details.current_title,
+            "promotion_path": details.promotion_path,
+            "independent_pi": details.independent_pi,
+            "lab_space": details.lab_space,
+            "startup_funding": details.startup_funding,
+            "startup_funding_terms": details.startup_funding_terms,
+            "can_supervise_master": details.can_supervise_master,
+            "can_supervise_phd": details.can_supervise_phd,
+            "master_quota": details.master_quota,
+            "phd_quota": details.phd_quota,
+            "fixed_income": details.fixed_income,
+            "performance_income": details.performance_income,
+            "housing_settlement": details.housing_settlement,
+            "housing_subsidy": details.housing_subsidy,
+            "talent_housing": details.talent_housing,
+            "regional_talent_subsidy": details.regional_talent_subsidy,
+        }
+    return {
+        "title": job.title,
+        "department": job.department,
+        "job_category": job.job_category,
+        "country": job.country,
+        "province": job.province,
+        "city": job.city,
+        "employment_type": job.employment_type,
+        "degree_requirement": job.degree_requirement,
+        "experience_requirement": job.experience_requirement,
+        "salary_text": job.salary_text,
+        "salary_currency": job.salary_currency,
+        "salary_period": job.salary_period,
+        "guaranteed_salary_min": job.guaranteed_salary_min,
+        "guaranteed_salary_max": job.guaranteed_salary_max,
+        "variable_salary_min": job.variable_salary_min,
+        "variable_salary_max": job.variable_salary_max,
+        "advertised_total_min": job.advertised_total_min,
+        "advertised_total_max": job.advertised_total_max,
+        "deadline": str(job.deadline) if job.deadline else None,
+        "academic_details": academic or None,
+    }
+
+
+def build_evaluation_context(db: Session, job: Job, profile: dict | None = None) -> dict:
+    """构造真实 AI 输入。返回的 dict 同时作为 user message 与 input_snapshot。"""
+    profile_cfg = profile if profile is not None else get_profile_config()
+
+    # Evidence 作用域：只取属于当前岗位或其单位的证据（组织级风评是长期资产）
+    if job.organization_id is not None:
+        scope = or_(
+            Evidence.job_id == job.id,
+            Evidence.organization_id == job.organization_id,
+        )
+    else:
+        scope = Evidence.job_id == job.id
+    evidence_rows = db.scalars(select(Evidence).where(scope)).all()
+    evidence_list = [
+        {
+            "id": ev.id,
+            "claim": ev.claim,
+            "category": ev.category,
+            "evidence_level": ev.evidence_level,
+            "stance": ev.stance,
+            "scope_level": ev.scope_level,
+            "scope_name": ev.scope_name,
+            "is_firsthand": ev.is_firsthand,
+            "independence_key": ev.independence_key,
+            "source_type": ev.source_type,
+            "source_author": ev.source_author,
+            "published_at": str(ev.published_at) if ev.published_at else None,
+        }
+        for ev in evidence_rows
+    ]
+
+    tier = get_region_tier(job.province, job.city)
+    return {
+        "profile": profile_cfg,
+        "job": _job_context_dict(job),
+        "region": {
+            "tier": tier,
+            "score": get_region_score(job.province, job.city),
+            "note": "score 为用户地区偏好基准分；unrated 表示用户未评价该地区",
+        },
+        "evidence": evidence_list,
+        "hard_filters": profile_cfg.get("hard_filters") or {},
+    }
+
+
+def validate_input_snapshot(snapshot: object) -> None:
+    """审计强约束：input_snapshot 必须是非空 dict 且包含全部五键（值可为空集合）。"""
+    if not isinstance(snapshot, dict) or not snapshot:
+        raise ValueError("input_snapshot 必须是非空 dict，拒绝保存评估")
+    missing = REQUIRED_SNAPSHOT_KEYS - set(snapshot)
+    if missing:
+        raise ValueError(f"input_snapshot 缺少键: {sorted(missing)}，拒绝保存评估")
+
+
+def _validate_evidence_scope(db: Session, job: Job, provided_ids: list[int]) -> None:
+    """每条用于评估的 Evidence 必须属于当前岗位或其单位。"""
+    if not provided_ids:
+        return
+    rows = db.execute(
+        select(Evidence.id, Evidence.job_id, Evidence.organization_id).where(
+            Evidence.id.in_(provided_ids)
+        )
+    ).all()
+    for evidence_id, evidence_job_id, evidence_org_id in rows:
+        in_job_scope = evidence_job_id == job.id
+        in_org_scope = (
+            job.organization_id is not None
+            and evidence_org_id == job.organization_id
+        )
+        if not (in_job_scope or in_org_scope):
+            raise ValueError(
+                f"Evidence #{evidence_id} 不属于当前岗位或其单位，拒绝用于本次评估"
+            )
+
+
+def _validate_evidence_consistency(
+    db: Session, job: Job, provided_ids: list[int], ai_output: AIEvaluationOut
+) -> None:
+    """risk_items.evidence_ids ⊆ 本次 evaluation evidence_ids ⊆ 作用域内的真实 Evidence。"""
+    _validate_evidence_scope(db, job, provided_ids)
+    if provided_ids:
+        existing = set(
+            db.scalars(select(Evidence.id).where(Evidence.id.in_(provided_ids)))
+        )
+        missing = set(provided_ids) - existing
+        if missing:
+            raise ValueError(
+                f"evidence_ids 引用了不存在的证据: {sorted(missing)}，拒绝保存评估"
+            )
+    for item in ai_output.risk_items:
+        unprovided = [eid for eid in item.evidence_ids if eid not in provided_ids]
+        if unprovided:
+            raise ValueError(
+                f"风险条目 '{item.type}' 引用了未提供给本次评估的证据 {unprovided}；"
+                "结论必须能追溯到本次评估实际使用的 Evidence，拒绝保存"
+            )
+
+
+def evaluate_job(
+    db: Session,
+    job: Job,
+    provider: LLMProvider,
+    profile: dict | None = None,
+) -> JobEvaluation:
+    """完整评估编排：构造 context → 调 AI → 确定性 finalize。同一份 context 发模型并存库。"""
+    context = build_evaluation_context(db, job, profile)
+    validate_input_snapshot(context)
+    ai_output, prompt_version = provider.evaluate_job(context)
+
+    scores = ai_output.scores.model_dump()
+    region_from_ai = scores.pop("region")
+    region_score = (
+        region_from_ai
+        if region_from_ai is not None
+        else get_region_score(job.province, job.city)
+    )
+    dimension_scores = {**scores, "region": region_score}
+    evidence_ids = [e["id"] for e in context["evidence"]]
+
+    return finalize_evaluation(
+        db,
+        job,
+        ai_output=ai_output,
+        dimension_scores=dimension_scores,
+        evidence_ids=evidence_ids,
+        input_snapshot=context,
+        profile=profile,
+        provider_name=provider.name,
+        model=getattr(provider, "model", None),
+        prompt_version=prompt_version,
+    )
+
+
 def finalize_evaluation(
     db: Session,
     job: Job,
@@ -74,8 +268,9 @@ def finalize_evaluation(
     dimension_scores 由调用方合成（AI 维度分 + 地区基准分等），本函数只做
     确定性计算与持久化。任何一致性校验失败都会抛错拒绝保存，不静默降级。
     """
+    validate_input_snapshot(input_snapshot)
     provided_ids = list(dict.fromkeys(evidence_ids or []))
-    _validate_evidence_consistency(db, provided_ids, ai_output)
+    _validate_evidence_consistency(db, job, provided_ids, ai_output)
 
     snapshots = config_snapshots(profile)
     effective_risk = compute_effective_risk(ai_output)
@@ -131,26 +326,3 @@ def finalize_evaluation(
         db.add(EvaluationEvidence(evaluation_id=evaluation.id, evidence_id=evidence_id))
     db.flush()
     return evaluation
-
-
-def _validate_evidence_consistency(
-    db: Session, provided_ids: list[int], ai_output: AIEvaluationOut
-) -> None:
-    """risk_items.evidence_ids ⊆ 本次 evaluation evidence_ids ⊆ 真实存在的 Evidence。"""
-    if provided_ids:
-        existing = set(
-            db.scalars(select(Evidence.id).where(Evidence.id.in_(provided_ids)))
-        )
-        missing = set(provided_ids) - existing
-        if missing:
-            raise ValueError(
-                f"evidence_ids 引用了不存在的证据: {sorted(missing)}，拒绝保存评估"
-            )
-
-    for item in ai_output.risk_items:
-        unprovided = [eid for eid in item.evidence_ids if eid not in provided_ids]
-        if unprovided:
-            raise ValueError(
-                f"风险条目 '{item.type}' 引用了未提供给本次评估的证据 {unprovided}；"
-                "结论必须能追溯到本次评估实际使用的 Evidence，拒绝保存"
-            )
