@@ -1,5 +1,7 @@
 """Application CRM API（Phase 5）。"""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.schemas.application import (
     ApplicationCreate,
     ApplicationListPage,
     ApplicationOut,
+    ApplicationStatusLiteral,
     ApplicationUpdate,
 )
 from app.services import applications as application_service
@@ -17,9 +20,11 @@ router = APIRouter(tags=["applications"])
 
 @router.get("/applications", response_model=ApplicationListPage)
 def list_applications(
-    status: str | None = Query(None, description="按状态过滤"),
-    q: str | None = Query(None, description="搜索 next_action/备注/联系人"),
-    sort: str = Query("updated_at", description="updated_at | next_action_date | priority"),
+    status: ApplicationStatusLiteral | None = Query(None, description="按状态过滤"),
+    q: str | None = Query(None, description="搜索 next_action/备注/联系人/岗位标题"),
+    sort: Literal["updated_at", "next_action_date", "priority"] = Query(
+        "updated_at", description="排序方式"
+    ),
     db: Session = Depends(get_db),
 ):
     items = application_service.list_applications(db, status=status, q=q, sort=sort)

@@ -37,14 +37,66 @@ def test_create_application_unknown_field_rejected(client, job_id):
     assert resp.status_code == 422
 
 
-def test_status_transition_forward(client, job_id):
+def test_status_transition_forward_and_applied_at_semantics(client, job_id):
+    """Phase 5.1 P0：applied_at 只在真正进入 applied 时记录（contacting 不算投递）。"""
     app = client.post(f"/api/jobs/{job_id}/application", json={}).json()
-    for status in ("reviewed", "shortlist", "preparing", "applied", "interview_1", "offer"):
-        resp = client.patch(f"/api/applications/{app['id']}", json={"status": status})
+    app_id = app["id"]
+
+    # contacting：洽联不是投递 → applied_at 必须为 null
+    for status in ("reviewed", "shortlist", "contacting"):
+        resp = client.patch(f"/api/applications/{app_id}", json={"status": status})
         assert resp.status_code == 200, resp.text
-        assert resp.json()["status"] == status
-    # applied_at 在进入 contacting/applied 时自动记录
-    assert client.get(f"/api/applications/{app['id']}").json() is not None
+    assert resp.json()["applied_at"] is None  # contacting 阶段仍未投递
+
+    resp = client.patch(f"/api/applications/{app_id}", json={"status": "preparing"})
+    assert resp.json()["applied_at"] is None
+
+    # applied：此时才记录投递时间
+    resp = client.patch(f"/api/applications/{app_id}", json={"status": "applied"})
+    assert resp.status_code == 200
+    applied_at = resp.json()["applied_at"]
+    assert applied_at is not None
+
+    # 之后进入 interview/offer：applied_at 不再变化（首次投递时间）
+    for status in ("interview_1", "offer"):
+        resp = client.patch(f"/api/applications/{app_id}", json={"status": status})
+        assert resp.json()["applied_at"] == applied_at
+
+    # 直接以历史终态建档：系统不知道真实投递日期 → null（未知比猜更正确）
+    other = client.post(
+        "/api/jobs",
+        json={**JOB_PAYLOAD, "title": "历史岗位", "description_raw": "历史导入测试公告。"},
+    ).json()
+    resp = client.post(f"/api/jobs/{other['id']}/application", json={"status": "offer"})
+    assert resp.status_code == 201
+    assert resp.json()["applied_at"] is None
+
+
+def test_patch_status_null_rejected_422(client, job_id):
+    """Phase 5.1 P1：status 显式 null → 422，不允许走到数据库 500。"""
+    app = client.post(f"/api/jobs/{job_id}/application", json={}).json()
+    resp = client.patch(f"/api/applications/{app['id']}", json={"status": None})
+    assert resp.status_code == 422
+    # 原状态不变
+    assert (
+        client.patch(
+            f"/api/applications/{app['id']}", json={"notes": "状态保持"}
+        ).json()["status"]
+        == "new"
+    )
+
+
+def test_invalid_query_params_rejected(client):
+    """Phase 5.1 P1：status/sort 查询参数严格枚举，非法值 422 而非静默容错。"""
+    resp = client.get("/api/applications", params={"status": "banana"})
+    assert resp.status_code == 422
+    resp = client.get("/api/applications", params={"sort": "whatever"})
+    assert resp.status_code == 422
+    # 合法值正常
+    assert client.get("/api/applications", params={"status": "offer"}).status_code == 200
+    assert client.get(
+        "/api/applications", params={"sort": "next_action_date"}
+    ).status_code == 200
 
 
 def test_status_transition_illegal_jump_rejected(client, job_id):

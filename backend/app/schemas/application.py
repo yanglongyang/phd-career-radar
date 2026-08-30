@@ -7,7 +7,7 @@ extra="forbid"：未知字段显式 422，不静默忽略。
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from app.models.application import Application
@@ -35,11 +35,20 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
-    """部分更新。status 变化受 APPLICATION_STATUS_TRANSITIONS 流转表约束。"""
+    """部分更新。status 变化受 APPLICATION_STATUS_TRANSITIONS 流转表约束。
+
+    status 不允许显式传 null：省略 = 不修改，null = 422（状态列 NOT NULL，
+    显式失败优于 IntegrityError/500，Phase 5.1）。"""
 
     model_config = ConfigDict(extra="forbid")
 
     status: ApplicationStatusLiteral | None = None
+
+    @model_validator(mode="after")
+    def _status_not_explicit_null(self) -> "ApplicationUpdate":
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status 不允许置空；请省略该字段或提供合法状态")
+        return self
     priority: int | None = Field(default=None, ge=1, le=10)
     resume_version: str | None = Field(default=None, max_length=64)
     cover_letter_version: str | None = Field(default=None, max_length=64)

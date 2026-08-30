@@ -494,7 +494,18 @@ export default function JobDetailPage() {
         )}
 
         {tab === "application" && (
-          application ? (
+          applicationQuery.isLoading ? (
+            <EmptyState title="加载申请记录中…" />
+          ) : applicationQuery.isError ? (
+            <Card>
+              <div className="px-4 py-6 text-center">
+                <p className="text-sm font-medium text-red-600 dark:text-red-400">申请记录加载失败</p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  {applicationQuery.error.message}
+                </p>
+              </div>
+            </Card>
+          ) : application ? (
             <Card>
               <CardHeader className="flex items-center justify-between">
                 <CardTitle>申请记录</CardTitle>

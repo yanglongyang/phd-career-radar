@@ -133,7 +133,7 @@ python -m alembic downgrade -1     # 回退一步
 | 2.1.1 | Consistency fixes：四轴 null→unknown 归一、Risk 证据引用强一致（⊆ 本次评估 ⊆ 真实存在）、effective_risk 由后端派生、reject_high_risk_tenure_track 真正执行、position_nature 完全退休、input_snapshot 强制 | ✅ 完成 |
 | 3 | AI 结构化提取：粘贴公告/URL → AI 解析 → 结构化预览（含信息缺口标注）→ 用户逐项确认/修正 → 岗位+高校字段原子入库 | ✅ 完成（Phase 3.1 完整性加固：Preview→Save 字段映射纯函数化并有逐字段测试、provenance 随预览返回、SSRF 边界、大小限制、JobImportRecord 导入审计） |
 | 4 | AI 评估：后端自动构造输入快照（Profile+岗位含 JD 正文+地区+分层 Evidence+Hard Filters）→ 同一份内容发给模型并存档 → AI 输出七个维度分（region 由地区引擎独占）/结构化风险/信息缺口/置信度 → 规则引擎计算总分/覆盖度/推荐等级 → 可审计入库；地区分只由用户配置决定、无证据强制风评=null、Evidence 按 job/单位/院系/实验室分层过滤（Phase 4.1/4.1.1 完整性加固：finalize 以 input_snapshot 为唯一事实源——region/reputation/Profile/Hard Filters 均由快照强制，任何调用方无法制造矛盾评估；snapshot 与审计关联强一致、首聘周期入 context、department scope 双非空匹配） | ✅ 完成（需配置 AI；AI 未配置时明确 503，评估数据不一致时 409 拒绝保存） |
-| 5 | Career CRM：详情页一键加入 CRM、申请状态流转 API（14 态流转表约束、非法流转 409）、看板拖拽改状态 + 列表视图、next action/优先级/联系人/简历版本、Dashboard 流程计数联动 | ✅ 完成 |
+| 5 | Career CRM：详情页一键加入 CRM、申请状态流转 API（14 态流转表约束、非法流转 409、applied_at 仅在真正投递时记录、status 显式 null/非法查询参数 422）、看板拖拽改状态 + 列表视图（加载失败透明显示）、next action 本地日期逾期提醒、Dashboard 流程计数联动 | ✅ 完成 |
 | 6 | Evidence CRUD UI 与风评聚合、可信度呈现 | ⬜ 未实现（数据模型已建） |
 | 7 | 设置页、筛选增强、测试补全、文档完善、Collector 架构 | ⬜ 未实现 |
 

@@ -75,7 +75,9 @@ def create_application(db: Session, job_id: int, payload: ApplicationCreate) -> 
         job_id=job_id,
         status=payload.status,
         priority=payload.priority,
-        applied_at=_now() if payload.status in ("applied", "contacting") else None,
+        # 只有明确以 applied 状态建档才记录投递时间；直接建为
+        # interview/offer 等历史态时 applied_at 保持 null —— 未知比猜"现在"更正确
+        applied_at=_now() if payload.status == "applied" else None,
         resume_version=payload.resume_version,
         cover_letter_version=payload.cover_letter_version,
         contact=payload.contact,
@@ -97,8 +99,9 @@ def update_application(db: Session, app: Application, payload: ApplicationUpdate
                 f"申请状态不允许从 '{app.status}' 流转到 '{new_status}'；"
                 f"允许的目标状态: {sorted(APPLICATION_STATUS_TRANSITIONS.get(app.status, set()))}"
             )
-        # 进入 contacting/applied 即记录投递时间
-        if new_status in ("contacting", "applied") and app.applied_at is None:
+        # 投递时间只在真正进入 applied 时记录（Phase 5.1 P0：contacting 是洽联，
+        # 不是投递——否则 9 月 1 日联系 PI 会被永久写成 9 月 1 日投递）
+        if new_status == "applied" and app.applied_at is None:
             app.applied_at = _now()
     for field, value in data.items():
         setattr(app, field, value)

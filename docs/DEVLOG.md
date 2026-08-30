@@ -448,3 +448,49 @@ Dashboard 流程计数在 Phase 2.1 已就位，本轮无新表/无 migration。
 - **Phase 6 风评聚合未实现**（Evidence UI/聚合/unknown scope 策略）。
 - Kanban 拖拽暂无乐观更新（失败由 invalidate 回滚）；申请状态无历史时间线（规格未要求，可作 Phase 7 增强）。
 - 批量重评、设置页可视化（Phase 7）。
+
+---
+
+## Phase 5.1 — CRM Integrity Fixes（2026-08-31 完成）
+
+依据第七轮审查执行，五个问题修复。**无 migration，不触碰 Phase 2-4。**
+
+### P0
+
+- **applied_at 语义修正**：只在真正进入 `applied` 时记录投递时间（contacting 洽联不再误写——
+  此前"9 月 1 日联系 PI"会被永久写成"9 月 1 日投递"）；创建时仅当直接以 applied 建档才记录；
+  直接以 interview/offer 等历史终态建档 → applied_at 保持 null（未知比猜"现在"更正确，后续可
+  显式编辑）。
+- **假测试修正**：原断言走不存在的 `GET /applications/{id}`（404 JSON is not None 假通过），
+  改为断言 PATCH 返回值：contacting → null、preparing → null、applied → 非 null、
+  interview/offer 后时间戳不变；另加"历史终态建档 → null"用例。
+
+### P1
+
+- **PATCH `status: null` → 422**：`ApplicationUpdate` model_validator 基于显式字段集校验
+  （省略 = 不修改；null = 422），不再走到 NOT NULL 列的 IntegrityError/500。与 AcademicDetails
+  四轴、extra="forbid" 的"显式失败"哲学一致。
+- **查询失败透明显示**：申请 CRM 列表（isError → 红色错误卡，不再伪装成"还没有申请记录"）与
+  岗位详情 Application 页签（loading/error/null/有申请四态分离）都区分了失败与空数据。
+- **查询参数严格枚举**：`status` 用 ApplicationStatusLiteral、`sort` 用 Literal 三值，
+  非法值 422，不再静默落默认排序。
+
+### P2
+
+- **本地日期边界**：新增 `localToday()`（浏览器本地时区的今天）用于看板逾期判断；
+  `formatDate()` 区分 date-only（原样）与 timestamp（明确转本地日历日）——非 UTC 时区午夜
+  附近的"逾期漏标"与投递日期展示歧义消除。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**133 passed**（applied_at 语义链路、status null 422、非法查询参数 422；假测试已重写）
+- vitest：9 passed；ruff：All checks passed；前端 build：通过
+
+### 明确未实现
+
+- **Phase 6 风评聚合未实现**；Kanban 拖拽乐观更新、申请状态历史时间线（可选 Phase 7）、
+  applied_at 显式编辑、批量重评与设置页（Phase 7）未实现。

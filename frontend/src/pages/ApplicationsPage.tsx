@@ -12,6 +12,7 @@ import {
   APPLICATION_STATUS_ORDER,
   applicationStatusTone,
   formatDate,
+  localToday,
 } from "../lib/utils";
 import {
   Badge,
@@ -44,7 +45,7 @@ export default function ApplicationsPage() {
   const [editing, setEditing] = useState<Application | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["applications"],
     queryFn: () => listApplications({ sort: "updated_at" }),
   });
@@ -104,7 +105,14 @@ export default function ApplicationsPage() {
         </div>
       )}
 
-      {isLoading ? (
+      {isError ? (
+        <Card>
+          <div className="px-4 py-6 text-center">
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">申请 CRM 加载失败</p>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{error.message}</p>
+          </div>
+        </Card>
+      ) : isLoading ? (
         <EmptyState title="加载中…" />
       ) : items.length === 0 ? (
         <Card>
@@ -158,7 +166,7 @@ export default function ApplicationsPage() {
                         {app.next_action && (
                           <p
                             className={`line-clamp-2 text-xs ${
-                              app.next_action_date && app.next_action_date < new Date().toISOString().slice(0, 10)
+                              app.next_action_date && app.next_action_date < localToday()
                                 ? "font-medium text-red-600 dark:text-red-400"
                                 : "text-amber-700 dark:text-amber-400"
                             }`}
