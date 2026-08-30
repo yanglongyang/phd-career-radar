@@ -27,9 +27,22 @@ def db_engine():
     engine.dispose()
 
 
+def _make_sessionmaker(engine):
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+@pytest.fixture()
+def db_session(db_engine):
+    """直接操作数据库的会话（用于没有 API 的模型级测试，如 Application/Evidence）。"""
+    session = _make_sessionmaker(db_engine)()
+    yield session
+    session.rollback()
+    session.close()
+
+
 @pytest.fixture()
 def client(db_engine):
-    TestingSession = sessionmaker(bind=db_engine, autoflush=False, expire_on_commit=False)
+    TestingSession = _make_sessionmaker(db_engine)
 
     def override_get_db():
         db = TestingSession()
@@ -55,6 +68,10 @@ JOB_PAYLOAD = {
     "salary_text": "年薪 30-40 万",
     "salary_min": 30,
     "salary_max": 40,
+    "salary_currency": "CNY",
+    "salary_period": "year",
+    "guaranteed_salary_min": 22,
+    "guaranteed_salary_max": 26,
     "description_raw": "招聘具有有机化学、荧光探针研究背景的青年人才，提供启动经费 50 万。",
 }
 

@@ -1,10 +1,10 @@
-"""岗位服务：创建（含去重）、更新（含版本捕获）、列表查询。"""
+"""岗位服务：创建（含去重）、更新（含版本捕获）、删除（保留组织级证据）、列表查询。"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, aliased
 
 from app.core.fingerprint import (
@@ -13,7 +13,7 @@ from app.core.fingerprint import (
     job_fingerprint,
     normalize_org_name,
 )
-from app.models import Job, JobEvaluation, JobVersion, Organization
+from app.models import Evidence, Job, JobEvaluation, JobVersion, Organization
 from app.models.enums import PositionNature
 from app.schemas.job import JobCreate, JobUpdate
 
@@ -114,6 +114,14 @@ def create_job(db: Session, payload: JobCreate) -> tuple[Job, Job | None]:
         salary_text=payload.salary_text,
         salary_min=payload.salary_min,
         salary_max=payload.salary_max,
+        salary_currency=payload.salary_currency,
+        salary_period=payload.salary_period,
+        guaranteed_salary_min=payload.guaranteed_salary_min,
+        guaranteed_salary_max=payload.guaranteed_salary_max,
+        variable_salary_min=payload.variable_salary_min,
+        variable_salary_max=payload.variable_salary_max,
+        advertised_total_min=payload.advertised_total_min,
+        advertised_total_max=payload.advertised_total_max,
         degree_requirement=payload.degree_requirement,
         experience_requirement=payload.experience_requirement,
         status=payload.status,
@@ -130,6 +138,14 @@ def get_job_or_404(db: Session, job_id: int) -> Job:
     if job is None:
         raise LookupError(f"岗位不存在: {job_id}")
     return job
+
+
+def delete_job(db: Session, job: Job) -> None:
+    """删除岗位但不破坏组织风评库：Evidence 的 job_id 置空后保留历史，
+    其余关联（评估/申请/版本/高校详情）随岗位级联删除。"""
+    db.execute(update(Evidence).where(Evidence.job_id == job.id).values(job_id=None))
+    db.delete(job)
+    db.flush()
 
 
 def update_job(db: Session, job: Job, payload: JobUpdate) -> Job:
@@ -276,6 +292,7 @@ def list_jobs(
 
 
 def top_jobs(db: Session, limit: int = 5) -> list[tuple[Job, JobEvaluation | None]]:
+    """Top Jobs：排除已忽略/已关闭与触发硬性排除(X)的岗位，按综合分排序。"""
     le = latest_evaluations_subquery()
     ev = aliased(JobEvaluation)
     stmt = (
@@ -283,6 +300,8 @@ def top_jobs(db: Session, limit: int = 5) -> list[tuple[Job, JobEvaluation | Non
         .outerjoin(le, le.c.job_id == Job.id)
         .outerjoin(ev, ev.id == le.c.eval_id)
         .where(ev.total_score.isnot(None))
+        .where(Job.status.notin_(["ignored", "closed"]))
+        .where(or_(ev.recommendation_level.is_(None), ev.recommendation_level != "X"))
         .order_by(ev.total_score.desc(), Job.id.desc())
         .limit(limit)
     )

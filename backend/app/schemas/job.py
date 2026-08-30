@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.academic import AcademicJobDetailsOut
 from app.schemas.evaluation import JobEvaluationOut
 from app.schemas.organization import OrganizationBrief
 
@@ -19,10 +20,10 @@ PositionNatureLiteral = Literal[
     "permanent", "tenure", "tenure_track", "pre_tenure",
     "fixed_term", "postdoc", "pi_funded", "unknown",
 ]
-JobStatusLiteral = Literal[
-    "new", "reviewing", "shortlisted", "preparing", "applied",
-    "interviewing", "offer", "closed", "ignored",
-]
+# legacy 字段：仅信息筛选状态；求职流程状态（preparing/applied/...）由 Application 负责
+JobDispositionLiteral = Literal["new", "reviewing", "shortlisted", "ignored", "closed"]
+SalaryCurrencyLiteral = Literal["CNY", "USD", "EUR", "GBP", "unknown"]
+SalaryPeriodLiteral = Literal["year", "month", "day", "hour", "unknown"]
 
 
 class JobSort(StrEnum):
@@ -55,11 +56,19 @@ class JobCreate(BaseModel):
     deadline: date | None = None
 
     employment_type: str | None = None
-    position_nature: PositionNatureLiteral = "unknown"
+    position_nature: PositionNatureLiteral = "unknown"  # legacy 派生展示字段
 
     salary_text: str | None = None
-    salary_min: float | None = None
-    salary_max: float | None = None
+    salary_min: float | None = None   # legacy / compatibility
+    salary_max: float | None = None   # legacy / compatibility
+    salary_currency: SalaryCurrencyLiteral | None = None
+    salary_period: SalaryPeriodLiteral | None = None
+    guaranteed_salary_min: float | None = None
+    guaranteed_salary_max: float | None = None
+    variable_salary_min: float | None = None
+    variable_salary_max: float | None = None
+    advertised_total_min: float | None = None
+    advertised_total_max: float | None = None
 
     degree_requirement: str | None = None
     experience_requirement: str | None = None
@@ -68,7 +77,7 @@ class JobCreate(BaseModel):
     source_job_id: str | None = None
     source_url: str | None = None
 
-    status: JobStatusLiteral = "new"
+    status: JobDispositionLiteral = "new"
 
     allow_duplicate: bool = False  # 去重冲突时由用户确认仍要创建
 
@@ -93,17 +102,25 @@ class JobUpdate(BaseModel):
     deadline: date | None = None
 
     employment_type: str | None = None
-    position_nature: PositionNatureLiteral | None = None
+    position_nature: PositionNatureLiteral | None = None  # legacy 派生展示字段
 
     salary_text: str | None = None
-    salary_min: float | None = None
-    salary_max: float | None = None
+    salary_min: float | None = None   # legacy / compatibility
+    salary_max: float | None = None   # legacy / compatibility
+    salary_currency: SalaryCurrencyLiteral | None = None
+    salary_period: SalaryPeriodLiteral | None = None
+    guaranteed_salary_min: float | None = None
+    guaranteed_salary_max: float | None = None
+    variable_salary_min: float | None = None
+    variable_salary_max: float | None = None
+    advertised_total_min: float | None = None
+    advertised_total_max: float | None = None
 
     degree_requirement: str | None = None
     experience_requirement: str | None = None
 
     source_url: str | None = None
-    status: JobStatusLiteral | None = None
+    status: JobDispositionLiteral | None = None
 
     # 用户最终决策字段，独立于 AI 评估
     user_rating: int | None = Field(default=None, ge=1, le=5)
@@ -123,6 +140,14 @@ class JobListItem(BaseModel):
     salary_text: str | None = None
     salary_min: float | None = None
     salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
+    guaranteed_salary_min: float | None = None
+    guaranteed_salary_max: float | None = None
+    variable_salary_min: float | None = None
+    variable_salary_max: float | None = None
+    advertised_total_min: float | None = None
+    advertised_total_max: float | None = None
     deadline: date | None = None
     first_seen_at: datetime
     source: str
@@ -137,7 +162,7 @@ class JobVersionOut(BaseModel):
     description: str | None = None
     salary_text: str | None = None
     deadline: date | None = None
-    changes: list[dict] = []
+    changes: list[dict] = Field(default_factory=list)
     captured_at: datetime
 
 
@@ -156,8 +181,9 @@ class JobDetailOut(JobListItem):
     created_at: datetime
     updated_at: datetime
 
-    versions: list[JobVersionOut] = []
+    versions: list[JobVersionOut] = Field(default_factory=list)
     has_version_changes: bool = False
+    academic_details: AcademicJobDetailsOut | None = None
 
 
 class JobListPage(BaseModel):

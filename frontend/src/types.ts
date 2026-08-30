@@ -12,10 +12,53 @@ export interface Organization {
   updated_at: string;
 }
 
+export interface RiskItem {
+  type: string;
+  severity: string;
+  reason: string;
+  evidence_ids: number[];
+}
+
+export interface AcademicJobDetails {
+  establishment_status: string;
+  tenure_status: string;
+  contract_type: string;
+  funding_source: string;
+  contract_years: number | null;
+  first_contract_period: string | null;
+  is_up_or_out: boolean | null;
+  midterm_review: string | null;
+  final_review: string | null;
+  publication_requirements: string | null;
+  grant_requirements: string | null;
+  teaching_requirements: string | null;
+  admin_requirements: string | null;
+  current_title: string | null;
+  promotion_path: string | null;
+  independent_pi: boolean | null;
+  lab_space: string | null;
+  startup_funding: string | null;
+  startup_funding_terms: string | null;
+  can_supervise_master: boolean | null;
+  can_supervise_phd: boolean | null;
+  master_quota: string | null;
+  phd_quota: string | null;
+  fixed_income: string | null;
+  performance_income: string | null;
+  housing_settlement: string | null;
+  housing_subsidy: string | null;
+  talent_housing: string | null;
+  regional_talent_subsidy: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Evaluation {
   id: number;
   job_id: number;
   total_score: number | null;
+  score_coverage: number | null;
+  provider: string | null;
   fit_score: number | null;
   career_stability_score: number | null;
   research_resources_score: number | null;
@@ -31,6 +74,7 @@ export interface Evaluation {
   strengths: string[];
   weaknesses: string[];
   risks: string[];
+  risk_items: RiskItem[];
   unknowns: string[];
   questions: string[];
   hard_filters_triggered: string[];
@@ -92,6 +136,7 @@ export interface JobDetail extends JobListItem {
   updated_at: string;
   versions: JobVersion[];
   has_version_changes: boolean;
+  academic_details: AcademicJobDetails | null;
 }
 
 export interface JobCreateInput {

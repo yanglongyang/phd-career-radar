@@ -29,16 +29,41 @@ export const POSITION_NATURE_LABELS: Record<string, string> = {
   unknown: "未知/待确认",
 };
 
+// 岗位信息筛选状态（JobDisposition）；求职流程状态由申请记录负责
 export const JOB_STATUS_LABELS: Record<string, string> = {
   new: "新发现",
   reviewing: "查看中",
   shortlisted: "重点关注",
-  preparing: "准备投递",
-  applied: "已投递",
-  interviewing: "面试中",
-  offer: "Offer",
-  closed: "已关闭",
   ignored: "已忽略",
+  closed: "已关闭",
+};
+
+export const ESTABLISHMENT_LABELS: Record<string, string> = {
+  established: "事业编",
+  non_established: "非事业编",
+  unknown: "未知 / 待确认",
+};
+
+export const TENURE_LABELS: Record<string, string> = {
+  tenured: "长聘",
+  tenure_track: "预聘（非升即走）",
+  non_tenure: "非长聘",
+  unknown: "未知 / 待确认",
+};
+
+export const CONTRACT_TYPE_LABELS: Record<string, string> = {
+  open_ended: "无固定期限",
+  fixed_term: "固定期限",
+  unknown: "未知 / 待确认",
+};
+
+export const FUNDING_SOURCE_LABELS: Record<string, string> = {
+  university: "学校经费",
+  department: "院系经费",
+  pi: "PI 经费",
+  external: "外部经费",
+  mixed: "混合经费",
+  unknown: "未知 / 待确认",
 };
 
 export const RECOMMENDATION_LABELS: Record<string, string> = {

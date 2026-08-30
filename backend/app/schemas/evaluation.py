@@ -3,16 +3,24 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from app.models import JobEvaluation
 
 
+class RiskItemOut(BaseModel):
+    type: str
+    severity: str
+    reason: str
+    evidence_ids: list[int] = Field(default_factory=list)
+
+
 class JobEvaluationOut(BaseModel):
     id: int
     job_id: int
-    total_score: float | None = None
+    total_score: float | None = None       # provisional：缺失维度重新归一化
+    score_coverage: float | None = None    # 0-100 评分覆盖度
 
     fit_score: float | None = None
     career_stability_score: float | None = None
@@ -28,13 +36,15 @@ class JobEvaluationOut(BaseModel):
     confidence_level: str | None = None
 
     summary: str | None = None
-    strengths: list[str] = []
-    weaknesses: list[str] = []
-    risks: list[str] = []
-    unknowns: list[str] = []
-    questions: list[str] = []
-    hard_filters_triggered: list[str] = []
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)        # legacy 文本，兼容保留
+    risk_items: list[RiskItemOut] = Field(default_factory=list)  # 结构化风险
+    unknowns: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+    hard_filters_triggered: list[str] = Field(default_factory=list)
 
+    provider: str | None = None
     evaluation_version: str
     prompt_version: str | None = None
     model: str | None = None
@@ -46,6 +56,7 @@ class JobEvaluationOut(BaseModel):
             id=e.id,
             job_id=e.job_id,
             total_score=e.total_score,
+            score_coverage=e.score_coverage,
             fit_score=e.fit_score,
             career_stability_score=e.career_stability_score,
             research_resources_score=e.research_resources_score,
@@ -61,9 +72,13 @@ class JobEvaluationOut(BaseModel):
             strengths=list(e.strengths_json or []),
             weaknesses=list(e.weaknesses_json or []),
             risks=list(e.risks_json or []),
+            risk_items=[
+                RiskItemOut.model_validate(item) for item in (e.risk_items_json or [])
+            ],
             unknowns=list(e.unknowns_json or []),
             questions=list(e.questions_json or []),
             hard_filters_triggered=list(e.hard_filters_json or []),
+            provider=e.provider,
             evaluation_version=e.evaluation_version,
             prompt_version=e.prompt_version,
             model=e.model,

@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.ai.provider import get_provider
 from app.db.session import get_db
 from app.models import JobEvaluation
+from app.models.academic_job_details import AcademicJobDetails
+from app.schemas.academic import AcademicJobDetailsOut, AcademicJobDetailsUpdate
 from app.schemas.evaluation import JobEvaluationOut
 from app.schemas.job import (
     JobCreate,
@@ -37,6 +39,14 @@ def _to_list_item(job, evaluation) -> JobListItem:
         salary_text=job.salary_text,
         salary_min=job.salary_min,
         salary_max=job.salary_max,
+        salary_currency=job.salary_currency,
+        salary_period=job.salary_period,
+        guaranteed_salary_min=job.guaranteed_salary_min,
+        guaranteed_salary_max=job.guaranteed_salary_max,
+        variable_salary_min=job.variable_salary_min,
+        variable_salary_max=job.variable_salary_max,
+        advertised_total_min=job.advertised_total_min,
+        advertised_total_max=job.advertised_total_max,
         deadline=job.deadline,
         first_seen_at=job.first_seen_at,
         source=job.source,
@@ -86,6 +96,11 @@ def _to_detail(job) -> JobDetailOut:
             for v in sorted(job.versions, key=lambda x: x.captured_at, reverse=True)
         ],
         has_version_changes=any((v.changes_json or []) for v in job.versions),
+        academic_details=(
+            AcademicJobDetailsOut.model_validate(job.academic_details)
+            if job.academic_details
+            else None
+        ),
     )
     return JobDetailOut(**data)
 
@@ -183,8 +198,41 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
         job = job_service.get_job_or_404(db, job_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    db.delete(job)
+    job_service.delete_job(db, job)  # Evidence 保留，job_id 置空
     db.commit()
+
+
+@router.get("/{job_id}/academic-details", response_model=AcademicJobDetailsOut | None)
+def get_academic_details(job_id: int, db: Session = Depends(get_db)):
+    """高校岗位专用字段。企业岗位返回 null。"""
+    try:
+        job = job_service.get_job_or_404(db, job_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    if job.academic_details is None:
+        return None
+    return AcademicJobDetailsOut.model_validate(job.academic_details)
+
+
+@router.patch("/{job_id}/academic-details", response_model=AcademicJobDetailsOut)
+def update_academic_details(
+    job_id: int, payload: AcademicJobDetailsUpdate, db: Session = Depends(get_db)
+):
+    """Upsert：不存在则创建。部分更新，显式传 null 表示"未知/待确认"。"""
+    try:
+        job = job_service.get_job_or_404(db, job_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    details = job.academic_details
+    if details is None:
+        details = AcademicJobDetails(job_id=job.id)
+        job.academic_details = details
+        db.add(details)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(details, field, value)
+    db.commit()
+    db.refresh(details)
+    return AcademicJobDetailsOut.model_validate(details)
 
 
 @router.get("/{job_id}/evaluations", response_model=list[JobEvaluationOut])

@@ -18,10 +18,12 @@ skills:
   - computational chemistry
 
 # 硬性过滤条件（Hard Filters）— 触发任意一项时推荐等级置为 X
-# 不确定的信息（如薪资未知）不会触发过滤，只会进入 unknowns
+# 不确定的信息不会触发过滤，只会进入 unknowns
 hard_filters:
   unacceptable_regions: []   # 例：[某城市] —— 默认为空，由用户自行填写
-  minimum_salary: null       # 例：30（万元/年，需结合 salary_min/max 判断）
+  # 最低薪资口径 = CNY 万元/年。仅当岗位具备 guaranteed_salary_max（固定收入上限）
+  # 且 currency=CNY、period=year 时才比较；单位不明 → 不触发，进入待确认。
+  minimum_salary: null       # 例：30
   reject_pi_funded: false    # 排除 PI 经费聘用岗位
   reject_postdoc: false      # 排除博士后岗位
   reject_high_risk_tenure_track: false  # 排除高风险预聘/非升即走岗位

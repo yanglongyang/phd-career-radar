@@ -127,11 +127,21 @@ python -m alembic downgrade -1     # 回退一步
 | --- | --- | --- |
 | 1 | 基础设施：仓库、后端、前端、数据库、迁移、基础 UI | ✅ 完成 |
 | 2 | Job/Organization CRUD、岗位列表/详情、手工导入、去重、版本监控、Dashboard API | ✅ 完成 |
+| 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |
 | 3 | AI 结构化提取（粘贴 JD → 结构化岗位 → 用户确认 → 保存） | ⬜ 未实现 |
-| 4 | AI 评估（Profile + Job + Evidence → 结构化评估、推荐等级、风险/可信度） | ⬜ 未实现（Provider/Schema 已就绪） |
+| 4 | AI 评估（Profile + Job + Evidence → 结构化评估、风险、可信度；推荐等级由后端规则引擎计算） | ⬜ 未实现（Provider/Schema/规则引擎已就绪） |
 | 5 | Career CRM（Shortlist、申请状态 Kanban、next action） | ⬜ 未实现（数据模型已建） |
 | 6 | Evidence CRUD UI 与风评聚合、可信度呈现 | ⬜ 未实现（数据模型已建） |
 | 7 | 设置页、筛选增强、测试补全、文档完善、Collector 架构 | ⬜ 未实现 |
+
+Phase 2.1 关键设计约定（详见 docs/DEVLOG.md）：
+
+- 高校聘用事实由四根正交轴表达（`establishment_status` / `tenure_status` / `contract_type` / `funding_source`），`position_nature` 降级为 legacy 展示字段。
+- 推荐等级（S/A/B/C/D/X）只由后端规则引擎计算；AI 不输出推荐等级/总分/覆盖度。
+- 综合评分为 provisional score，必须与 `score_coverage`（评分覆盖度）一起展示；信息不足不压分。
+- `confidence` 不封顶推荐等级：信息不足影响"判断有多可信"，不影响岗位价值判断。
+- 地区未评价（unrated）返回 null，与"用户中立"（neutral=50）区分。
+- 删除岗位保留组织级风评 Evidence（job_id 置空）。
 
 明确不做（V0.1）：自动投递、绕过反爬、自动联系 HR、多用户 SaaS、Redis/Kafka/微服务。
 

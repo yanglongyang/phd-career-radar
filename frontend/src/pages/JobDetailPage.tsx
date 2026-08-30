@@ -20,13 +20,18 @@ import {
 } from "../components/ui";
 import {
   CONFIDENCE_LABELS,
+  CONTRACT_TYPE_LABELS,
+  ESTABLISHMENT_LABELS,
+  FUNDING_SOURCE_LABELS,
   JOB_CATEGORY_LABELS,
   JOB_STATUS_LABELS,
   POSITION_NATURE_LABELS,
   RISK_LABELS,
   RECOMMENDATION_LABELS,
+  TENURE_LABELS,
   formatDate,
 } from "../lib/utils";
+import type { AcademicJobDetails } from "../types";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -143,6 +148,19 @@ export default function JobDetailPage() {
           <div>
             <p className="text-xs text-zinc-500">综合评分</p>
             <p className="text-3xl font-semibold tabular-nums">{evaluation?.total_score ?? "—"}</p>
+            {evaluation?.score_coverage !== null && evaluation?.score_coverage !== undefined && (
+              <p
+                className={
+                  evaluation.score_coverage < 40
+                    ? "mt-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
+                    : "mt-0.5 text-xs text-zinc-400"
+                }
+                title="评分覆盖度：已评分维度的权重占比；覆盖度低表示高分可能基于少量信息"
+              >
+                覆盖度 {evaluation.score_coverage}%
+                {evaluation.score_coverage < 40 ? " · 信息覆盖不足" : ""}
+              </p>
+            )}
           </div>
           <div>
             <p className="mb-1 text-xs text-zinc-500">推荐等级</p>
@@ -284,6 +302,22 @@ export default function JobDetailPage() {
                 </CardContent>
               </Card>
               <Card className="col-span-2">
+                <CardHeader><CardTitle>风险条目（结构化）</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {evaluation.risk_items.length > 0
+                    ? evaluation.risk_items.map((item, i) => (
+                        <div key={i} className="flex flex-wrap items-baseline gap-2 text-sm">
+                          <Badge tone={item.severity === "high" || item.severity === "critical" ? "red" : item.severity === "medium" ? "amber" : "zinc"}>
+                            {item.severity}
+                          </Badge>
+                          <span className="font-medium">{item.type}</span>
+                          <span className="text-zinc-600 dark:text-zinc-400">{item.reason}</span>
+                        </div>
+                      ))
+                    : <span className="text-sm text-zinc-400">—</span>}
+                </CardContent>
+              </Card>
+              <Card className="col-span-2">
                 <CardHeader><CardTitle>劣势 / 弱点</CardTitle></CardHeader>
                 <CardContent>
                   <ul className="list-disc space-y-1 pl-5 text-sm">
@@ -298,18 +332,40 @@ export default function JobDetailPage() {
         )}
 
         {tab === "institution" && (
-          <Card>
-            <CardContent className="grid grid-cols-2 gap-4 py-4 text-sm">
-              <InfoRow label="单位名称" value={job.organization?.name ?? "未登记"} />
-              <InfoRow label="单位类型" value={job.organization?.organization_type ?? "未知"} />
-              <InfoRow label="省份 / 城市" value={[job.organization?.province ?? job.province, job.organization?.city ?? job.city].filter(Boolean).join(" / ") || "—"} />
-              <InfoRow label="院系" value={job.department ?? "—"} />
-              <InfoRow label="学历要求" value={job.degree_requirement ?? "未知/待确认"} />
-              <InfoRow label="经验要求" value={job.experience_requirement ?? "未知/待确认"} />
-              <InfoRow label="用工类型" value={job.employment_type ?? "未知/待确认"} />
-              <InfoRow label="发布日期" value={formatDate(job.posted_at)} />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardContent className="grid grid-cols-2 gap-4 py-4 text-sm">
+                <InfoRow label="单位名称" value={job.organization?.name ?? "未登记"} />
+                <InfoRow label="单位类型" value={job.organization?.organization_type ?? "未知"} />
+                <InfoRow label="省份 / 城市" value={[job.organization?.province ?? job.province, job.organization?.city ?? job.city].filter(Boolean).join(" / ") || "—"} />
+                <InfoRow label="院系" value={job.department ?? "—"} />
+                <InfoRow label="学历要求" value={job.degree_requirement ?? "未知/待确认"} />
+                <InfoRow label="经验要求" value={job.experience_requirement ?? "未知/待确认"} />
+                <InfoRow label="用工类型" value={job.employment_type ?? "未知/待确认"} />
+                <InfoRow label="发布日期" value={formatDate(job.posted_at)} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex items-center justify-between">
+                <CardTitle>高校岗位专用字段</CardTitle>
+                <span className="text-xs text-zinc-400">
+                  {job.academic_details ? "" : "尚未填写（PATCH /api/jobs/{id}/academic-details）"}
+                </span>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-4 py-4 text-sm">
+                {job.academic_details
+                  ? academicRows(job.academic_details).map(([label, value]) => (
+                      <InfoRow key={label} label={label} value={value} />
+                    ))
+                  : (
+                    <p className="col-span-2 text-sm text-zinc-500 dark:text-zinc-400">
+                      暂无高校聘用事实。编制、长聘体系、合同期限、经费来源是四个独立维度，
+                      可通过 academic-details 接口维护；未填写的字段一律视为「未知 / 待确认」。
+                    </p>
+                  )}
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {tab === "region" && (
@@ -432,4 +488,45 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="font-medium">{value}</span>
     </div>
   );
+}
+
+
+function unknownIfEmpty(value: string | null | undefined): string {
+  return value && value.trim() !== "" ? value : "未知 / 待确认";
+}
+
+function boolLabel(value: boolean | null | undefined, yes: string, no: string): string {
+  if (value === null || value === undefined) return "未知 / 待确认";
+  return value ? yes : no;
+}
+
+function academicRows(d: AcademicJobDetails): [string, string][] {
+  return [
+    ["事业编状态", ESTABLISHMENT_LABELS[d.establishment_status] ?? d.establishment_status],
+    ["长聘体系", TENURE_LABELS[d.tenure_status] ?? d.tenure_status],
+    ["合同类型", CONTRACT_TYPE_LABELS[d.contract_type] ?? d.contract_type],
+    ["经费来源", FUNDING_SOURCE_LABELS[d.funding_source] ?? d.funding_source],
+    ["非升即走", boolLabel(d.is_up_or_out, "是", "否")],
+    ["合同年限", d.contract_years !== null ? `${d.contract_years} 年` : "未知 / 待确认"],
+    ["首聘周期", unknownIfEmpty(d.first_contract_period)],
+    ["中期考核", unknownIfEmpty(d.midterm_review)],
+    ["聘期考核", unknownIfEmpty(d.final_review)],
+    ["论文要求", unknownIfEmpty(d.publication_requirements)],
+    ["基金要求", unknownIfEmpty(d.grant_requirements)],
+    ["教学要求", unknownIfEmpty(d.teaching_requirements)],
+    ["行政要求", unknownIfEmpty(d.admin_requirements)],
+    ["启动经费", unknownIfEmpty(d.startup_funding)],
+    ["到账方式", unknownIfEmpty(d.startup_funding_terms)],
+    ["独立 PI", boolLabel(d.independent_pi, "是", "否")],
+    ["硕士招生", boolLabel(d.can_supervise_master, "可", "不可")],
+    ["博士招生", boolLabel(d.can_supervise_phd, "可", "不可")],
+    ["硕士指标", unknownIfEmpty(d.master_quota)],
+    ["博士指标", unknownIfEmpty(d.phd_quota)],
+    ["固定收入", unknownIfEmpty(d.fixed_income)],
+    ["绩效收入", unknownIfEmpty(d.performance_income)],
+    ["安家费", unknownIfEmpty(d.housing_settlement)],
+    ["住房补贴", unknownIfEmpty(d.housing_subsidy)],
+    ["人才房", unknownIfEmpty(d.talent_housing)],
+    ["地方人才补贴", unknownIfEmpty(d.regional_talent_subsidy)],
+  ];
 }

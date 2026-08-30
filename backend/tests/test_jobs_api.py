@@ -14,11 +14,14 @@ def test_get_job_detail(client, sample_job):
     data = resp.json()
     assert data["description_raw"].startswith("招聘具有")
     assert data["salary_max"] == 40
+    assert data["guaranteed_salary_max"] == 26
+    assert data["salary_currency"] == "CNY"
     assert data["versions"] == []
+    assert data["academic_details"] is None  # 尚未填写高校详情
 
 
 def test_list_filters_and_sort(client, sample_job):
-    # 再建一个不同状态的岗位（公告文本不同，避免触发同单位相似去重）
+    # 再建一个 shortlisted 状态的岗位（公告文本不同，避免触发同单位相似去重）
     resp = client.post(
         "/api/jobs",
         json={
@@ -72,16 +75,41 @@ def test_patch_invalid_status_rejected(client, sample_job):
     assert resp.status_code == 422
 
 
+def test_job_rejects_workflow_statuses(client, sample_job):
+    """Phase 2.1：Job 不再接受求职流程状态（applied/interviewing/offer/preparing）。"""
+    for workflow_status in ("applied", "interviewing", "offer", "preparing"):
+        resp = client.patch(f"/api/jobs/{sample_job['id']}", json={"status": workflow_status})
+        assert resp.status_code == 422, workflow_status
+
+
 def test_delete_job(client, sample_job):
     job_id = sample_job["id"]
     assert client.delete(f"/api/jobs/{job_id}").status_code == 204
     assert client.get(f"/api/jobs/{job_id}").status_code == 404
 
 
-def test_dashboard_counts(client, sample_job):
-    client.patch(f"/api/jobs/{sample_job['id']}", json={"status": "applied"})
+def test_dashboard_counts_split_job_and_application(client, sample_job, db_session):
+    """Phase 2.1：to_review/focus 来自 Job；applied/interviewing/offer 来自 Application。"""
+    from app.models import Application
+
+    client.patch(f"/api/jobs/{sample_job['id']}", json={"status": "shortlisted"})
+
+    # 每个岗位一条申请记录（Application.job_id 唯一；Application API 属于 Phase 5）
+    for suffix, status in (("A", "applied"), ("B", "interview_1"), ("C", "offer")):
+        resp = client.post(
+            "/api/jobs",
+            json={**JOB_PAYLOAD, "title": f"岗位{suffix}", "city": "苏州",
+                  "description_raw": f"申请流程测试岗位{suffix}。"},
+        )
+        assert resp.status_code == 201, resp.text
+        db_session.add(Application(job_id=resp.json()["id"], status=status))
+    db_session.commit()
+
     data = client.get("/api/dashboard").json()
-    assert data["counts"]["new_today"] == 1  # 今日新增与状态无关
-    assert data["counts"]["applied"] == 1
-    assert data["counts"]["to_review"] == 0
-    assert data["top_jobs"] == []
+    assert data["counts"]["new_today"] == 4  # 今日新增与状态无关（1 + 新建 3 个）
+    assert data["counts"]["focus"] == 1      # shortlisted 来自 Job
+    assert data["counts"]["to_review"] == 3  # 新建的 3 个岗位仍是 new
+    assert data["counts"]["applied"] == 1        # 来自 Application
+    assert data["counts"]["interviewing"] == 1   # interview_1 计入面试中
+    assert data["counts"]["offer"] == 1          # 来自 Application
+    assert data["counts"]["preparing"] == 0

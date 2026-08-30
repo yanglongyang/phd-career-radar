@@ -11,8 +11,10 @@ scoring:
   workload: 5           # 教学与行政负担
   long_term: 10         # 长期发展潜力
 
-# 推荐等级（S/A/B/C/D/X）不由 total_score 简单换算：
-# 先按分数落在阈值区间，再用风险/可信度封顶，硬性过滤触发时直接 X
+# 推荐等级（S/A/B/C/D/X）由后端规则引擎统一计算，AI 不输出等级：
+# 先按分数落在阈值区间，再用风险封顶，硬性过滤触发时直接 X。
+# 注意：total_score 是 provisional score（缺失维度重新归一化），
+# 展示时必须同时给出 score_coverage（评分覆盖度）。
 recommendation:
   thresholds:           # total_score 下限
     S: 85
@@ -22,8 +24,9 @@ recommendation:
   risk_cap:             # 风险等级对推荐等级的封顶
     critical: D
     high: C
-  confidence_cap:       # 信息可信度对推荐等级的封顶
-    low: B
+  # confidence_cap 默认关闭（空 = 不封顶）：信息不足 ≠ 岗位价值低，
+  # 信息可信度独立展示，不自动把 S/A 降到 B。如需启用可配置，如 {low: B}
+  confidence_cap: {}
 
 # 地区评分子维度权重（合计 15，对应上方 region 权重）
 region_sub_weights:
@@ -34,12 +37,12 @@ region_sub_weights:
   life_quality: 2       # 城市综合生活因素
 
 # 地区层级基准分（0-100），具体城市归属见 regions.yaml
+# 没有 unrated 键：未评价的地区直接返回 None，不猜测
 region_tier_scores:
   preferred: 90
   acceptable: 70
   neutral: 50
   avoid: 20
-  unknown: 50
 
 # Dashboard “高匹配” 判定：推荐等级属于以下集合
 high_match_levels: [S, A]

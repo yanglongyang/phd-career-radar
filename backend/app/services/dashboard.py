@@ -1,4 +1,10 @@
-"""Dashboard 汇总：今日新增 / 待查看 / 高匹配 / 重点关注 / 各流程状态计数 + Top Jobs。"""
+"""Dashboard 汇总（Phase 2.1 修正数据来源）。
+
+- new_today / to_review / focus：来自 Job 的信息筛选状态（JobDisposition）。
+- preparing / applied / interviewing / offer：来自 Application 的求职流程状态，
+  Job 不再承担求职流程语义。面试中 = 笔试 + 两轮面试阶段。
+- top_jobs：排除 ignored/closed 与推荐等级 X 的岗位。
+"""
 
 from __future__ import annotations
 
@@ -8,32 +14,40 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_scoring_config
-from app.models import Job, JobEvaluation
+from app.models import Application, Job, JobEvaluation
 from app.schemas.dashboard import DashboardCounts, DashboardOut
 from app.schemas.evaluation import JobEvaluationOut
 from app.schemas.job import JobListItem
 from app.schemas.organization import OrganizationBrief
 from app.services.jobs import latest_evaluations_subquery, top_jobs
 
+# Application 状态 → Dashboard"面试中"统计口径
+INTERVIEWING_STATUSES = ("written_test", "interview_1", "interview_2")
+
 
 def build_dashboard(db: Session) -> DashboardOut:
     now = datetime.now(UTC)
     today = now.date()
 
-    def count(where=None) -> int:
+    def job_count(where=None) -> int:
         stmt = select(func.count()).select_from(Job)
         if where is not None:
             stmt = stmt.where(where)
         return db.execute(stmt).scalar_one()
 
+    def application_count(where) -> int:
+        return db.execute(
+            select(func.count()).select_from(Application).where(where)
+        ).scalar_one()
+
     counts = DashboardCounts(
-        new_today=count(func.date(Job.first_seen_at) == today.isoformat()),
-        to_review=count(Job.status.in_(["new", "reviewing"])),
-        focus=count(Job.status == "shortlisted"),
-        preparing=count(Job.status == "preparing"),
-        applied=count(Job.status == "applied"),
-        interviewing=count(Job.status == "interviewing"),
-        offer=count(Job.status == "offer"),
+        new_today=job_count(func.date(Job.first_seen_at) == today.isoformat()),
+        to_review=job_count(Job.status.in_(["new", "reviewing"])),
+        focus=job_count(Job.status == "shortlisted"),
+        preparing=application_count(Application.status == "preparing"),
+        applied=application_count(Application.status == "applied"),
+        interviewing=application_count(Application.status.in_(INTERVIEWING_STATUSES)),
+        offer=application_count(Application.status == "offer"),
     )
 
     # 高匹配：最新评估的推荐等级属于配置的高匹配集合（默认 S/A）
@@ -61,6 +75,14 @@ def build_dashboard(db: Session) -> DashboardOut:
             salary_text=job.salary_text,
             salary_min=job.salary_min,
             salary_max=job.salary_max,
+            salary_currency=job.salary_currency,
+            salary_period=job.salary_period,
+            guaranteed_salary_min=job.guaranteed_salary_min,
+            guaranteed_salary_max=job.guaranteed_salary_max,
+            variable_salary_min=job.variable_salary_min,
+            variable_salary_max=job.variable_salary_max,
+            advertised_total_min=job.advertised_total_min,
+            advertised_total_max=job.advertised_total_max,
             deadline=job.deadline,
             first_seen_at=job.first_seen_at,
             source=job.source,

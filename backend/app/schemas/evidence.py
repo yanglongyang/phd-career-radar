@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 EvidenceLevelLiteral = Literal["A", "B", "C", "D"]
+StanceLiteral = Literal["positive", "negative", "mixed", "neutral", "unknown"]
+ScopeLiteral = Literal["organization", "department", "lab", "job", "unknown"]
 
 # 风评分类（Phase 6 聚合用）+ fact（官方事实）
 EVIDENCE_CATEGORIES = [
@@ -28,6 +30,13 @@ class EvidenceCreate(BaseModel):
     source_type: str | None = None
     source_url: str | None = None
     source_title: str | None = None
+    source_author: str | None = None
+    is_firsthand: bool | None = None          # true=第一手 / false=转述 / None=无法判断
+    independence_key: str | None = None       # 同一信息源（含转载）共享同一分组键
+    repost_of_evidence_id: int | None = None
+    stance: StanceLiteral = "unknown"
+    scope_level: ScopeLiteral = "unknown"
+    scope_name: str | None = None
     evidence_level: EvidenceLevelLiteral = "C"
     published_at: date | None = None
     confidence: Literal["low", "medium", "high"] | None = None
@@ -44,6 +53,13 @@ class EvidenceOut(BaseModel):
     source_type: str | None = None
     source_url: str | None = None
     source_title: str | None = None
+    source_author: str | None = None
+    is_firsthand: bool | None = None
+    independence_key: str | None = None
+    repost_of_evidence_id: int | None = None
+    stance: str
+    scope_level: str
+    scope_name: str | None = None
     evidence_level: str
     published_at: date | None = None
     collected_at: datetime
