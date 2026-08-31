@@ -1193,3 +1193,14 @@ OpenAI/AWS/GitHub/Google 凭据模式；main 分支开启保护（禁止 force p
   合法保存后载荷含绑定地址且密文文件无明文。
 - 真实 exe 端到端：绑定一致 → AI 正常发起（502 且错误信息只含 HTTP 状态 +
   error.type，不再回显密钥/正文）；绑定不一致 → 503（AI 禁用，不发送 Key）。
+
+### 供应链硬化落地（2026-08-31）
+
+- GitHub Actions CI 全绿：backend pytest（windows，含 DPAPI 测试）/ ruff check /
+  frontend build + vitest / secret scan 四个 job。
+- CI 修复两处：ruff 首次全量检查 backend（含 alembic）暴露的历史 import 排序问题
+  已修复；package-lock 用 npm 10（CI 版本）重新生成（vitest 内置 vite 8 的
+  esbuild peer 在 npm 11 生成的 lock 下 npm 10 校验失败）。
+- `main` 分支保护已开启：required status checks（4 job，strict）、
+  enforce_admins、禁止 force push、禁止删除分支。
+- 提交签名未启用（需用户配置 GPG/SSH 签名 key 后可选开启 required_signatures）。
