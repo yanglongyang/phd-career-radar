@@ -35,6 +35,7 @@ class CollectorRun(Base):
     duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
     possible_duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
     filtered_count: Mapped[int] = mapped_column(Integer, default=0)
+    recency_skipped_count: Mapped[int] = mapped_column(Integer, default=0)
     failed_source_count: Mapped[int] = mapped_column(Integer, default=0)
 
     items: Mapped[list["CollectorRunItem"]] = relationship(
@@ -63,6 +64,7 @@ class CollectorRunItem(Base):
     duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
     possible_duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
     filtered_count: Mapped[int] = mapped_column(Integer, default=0)
+    recency_skipped_count: Mapped[int] = mapped_column(Integer, default=0)
 
     error_message: Mapped[str | None] = mapped_column(String(500))  # 长度限制，不存敏感头
 

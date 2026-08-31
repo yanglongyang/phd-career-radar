@@ -16,7 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.collectors import registry as collectors_registry
-from app.collectors.config import SourceConfig, keyword_filter_passes
+from app.collectors.config import (
+    SourceConfig,
+    keyword_filter_passes,
+    parse_date_from_text,
+)
 from app.models import CollectorRun, CollectorRunItem, DiscoveredJob
 from app.services.collector_dedupe import (
     canonical_url,
@@ -85,6 +89,7 @@ def run_collectors(
             item.duplicate_count = stats["duplicate"]
             item.possible_duplicate_count = stats["possible_duplicate"]
             item.filtered_count = stats["filtered"]
+            item.recency_skipped_count = stats["recency_skipped"]
         except Exception as e:  # noqa: BLE001 —— 单点失败不中断
             item.status = "failed"
             item.finished_at = _now()
@@ -107,20 +112,40 @@ def run_collectors(
     run.duplicate_count = sum(i.duplicate_count for i in run.items)
     run.possible_duplicate_count = sum(i.possible_duplicate_count for i in run.items)
     run.filtered_count = sum(i.filtered_count for i in run.items)
+    run.recency_skipped_count = sum(i.recency_skipped_count for i in run.items)
     db.flush()
     return run
+
+
+def _recency_skipped(source: SourceConfig, raw) -> bool:
+    """max_age_days 过期过滤：列表页常混入多年前的旧岗位（2023/2016），
+    发布日期早于 max_age_days 的直接跳过，不再进 Inbox。
+
+    无法解析日期时 fail-open（不因过期跳过）——宁可保留待人工判断。"""
+    if not source.max_age_days:
+        return False
+    published = parse_date_from_text(raw.published_at_raw)
+    if published is None:
+        return False
+    return (_now().date() - published).days > source.max_age_days
 
 
 def _persist_source(
     db: Session, run_id: int, source: SourceConfig, raw_jobs
 ) -> dict:
-    stats = {"fetched": 0, "new": 0, "duplicate": 0, "possible_duplicate": 0, "filtered": 0}
+    stats = {
+        "fetched": 0, "new": 0, "duplicate": 0,
+        "possible_duplicate": 0, "filtered": 0, "recency_skipped": 0,
+    }
     for raw in raw_jobs:
         stats["fetched"] += 1
         searchable = f"{raw.title or ''} {raw.description_raw or ''}"
         keep, _reason = keyword_filter_passes(searchable, source.filters, source.id)
         if not keep:
             stats["filtered"] += 1
+            continue
+        if _recency_skipped(source, raw):
+            stats["recency_skipped"] += 1
             continue
 
         c_url = canonical_url(raw.source_url) or None

@@ -34,6 +34,7 @@ def _run_to_out(run: CollectorRun) -> CollectorRunOut:
         duplicate_count=run.duplicate_count,
         possible_duplicate_count=run.possible_duplicate_count,
         filtered_count=run.filtered_count,
+        recency_skipped_count=run.recency_skipped_count,
         failed_source_count=run.failed_source_count,
         items=[
             {
@@ -48,6 +49,7 @@ def _run_to_out(run: CollectorRun) -> CollectorRunOut:
                 "duplicate_count": i.duplicate_count,
                 "possible_duplicate_count": i.possible_duplicate_count,
                 "filtered_count": i.filtered_count,
+                "recency_skipped_count": i.recency_skipped_count,
                 "error_message": i.error_message,
             }
             for i in run.items

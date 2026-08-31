@@ -1082,3 +1082,38 @@ RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
 - 第二次运行：全部去重（dup=全部、new=0）；
 - exe 重新打包并冒烟：`run completed new 32 fail 0`；
 - 测试：pytest 32（collector 套件）+ 全量回归通过。
+
+## V0.2.2 — 旧岗位/导航条目过滤（真实使用反馈 #2，2026-08-31）
+
+用户反馈：抓取到的条目点进去是 2023 年甚至 2016 年的旧岗位。
+
+根因（逐来源核实）：
+
+- 华科列表页新旧混排（2023 年的启事和 2026 年的排在一起），日期嵌在 li 文本末尾；
+- 北大首页 mode2Ul 是频道聚合：分类标签（教学科研/行政教辅）被当成标题抓到，
+  且混有 2016 年的导航条目"博士后招聘信息请点此查看"（日期在 a 的 title 属性里）；
+- 上交研究队伍页（name=5）列表不是按时间排序，混有 2025 年的旧岗位。
+
+修复：
+
+1. **日期解析（parse_date_from_text / extract_date_text）**：从任意文本提取第一个
+   完整日期，兼容 `2026.08.24` / `2023-07-05` / `发布日期：2016-11-29` / `2025年9月8日`；
+   只认 4 位年份 + 月 + 日，"2025年专任教师招聘"（无月日）不误匹配。
+2. **过期岗位过滤（max_age_days，配置驱动）**：runner 在关键词过滤后按列表发布日期
+   跳过超过 N 天的旧岗位（4 个源均设 365）；日期无法解析时 fail-open 保留。
+   新增独立统计 `recency_skipped_count`（run + source 级），UI 显示"过期跳过"。
+3. **北大选择器修复**：item 改为 `ul.mode2Ul li dl dd`（真实公告），
+   日期取自 `a[title]`（`date_attr: title`）；排除词补充 公示/面试名单/名单/请点此查看。
+4. **华科日期**：无 date 选择器时回退扫描整行文本（日期嵌在 li 末尾）。
+5. **桌面版升级路径（app/db/migrate.py）**：create_all 只建缺失表不补缺失列，
+   新增 `ensure_missing_columns` 启动补列（仅普通列；主键/外键/唯一/索引列仍走 alembic），
+   保证用户旧库打开新 exe 不报 no such column。
+
+### 验证
+
+- 真实抓取冒烟（4 源）：`new=23 dup=1 possible=2 filtered=13 recency_skipped=11 failed=0`；
+  HUST 11 条 2023/2024 旧岗位全部跳过，PKU 抓到真实公告（物理学院量子材料中心等）；
+  本次入库 25 条，无日期 0 条，超过 365 天 0 条。
+- 旧库升级模拟：缺列数据库 → create_all + ensure_missing_columns → 补列成功、旧行默认 0、runner 正常。
+- 迁移 `87c3300ba3ba`：collector_runs / collector_run_items 增加 recency_skipped_count（server_default 0）。
+- 测试：pytest **223 passed**（+5 collector 日期/过滤 +2 迁移）；vitest **25 passed**；tsc 通过。

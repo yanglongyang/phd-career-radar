@@ -6,13 +6,42 @@ sources.yaml 是事实源：id 全局唯一、enabled 必须真正 boolean、
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import date
 
 import yaml
 
 from app.core.config import CONFIG_DIR
 
 KNOWN_TYPES = {"json_api", "html_list"}
+
+# 列表页日期格式多种多样（2026.08.24 / 2023-07-05 / 发布日期：2016-11-29 / 2025年9月8日），
+# 统一按"第一个完整日期"提取；用于 max_age_days 过期岗位过滤。
+_DATE_PATTERN = re.compile(r"(?P<y>\d{4})[-/.年](?P<m>\d{1,2})[-/.月](?P<d>\d{1,2})日?")
+
+
+def extract_date_text(raw: str | None) -> str | None:
+    """从任意文本提取第一个完整日期串（如 "2026.08.24" / "2016-11-29"），无则 None。"""
+    if not raw:
+        return None
+    m = _DATE_PATTERN.search(raw)
+    return m.group(0) if m else None
+
+
+def parse_date_from_text(raw: str | None) -> date | None:
+    """从任意文本解析第一个完整日期（YYYY[-/.年]M[-/.月]D），返回 date 或 None。
+
+    只认 4 位年份 + 月 + 日：HUST 标题里的"2025年专任教师招聘"（无月日）不会误匹配。"""
+    if not raw:
+        return None
+    m = _DATE_PATTERN.search(raw)
+    if not m:
+        return None
+    try:
+        return date(int(m.group("y")), int(m.group("m")), int(m.group("d")))
+    except ValueError:
+        return None
 
 # 关键字过滤（确定性、可解释）：命中 include 才保留，命中 exclude 丢弃
 DEFAULT_INCLUDE_KEYWORDS: list[str] = []
@@ -53,6 +82,7 @@ class SourceConfig:
     selectors: dict = field(default_factory=dict)
     detail: dict = field(default_factory=dict)
     mapping: dict = field(default_factory=dict)
+    max_age_days: int | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -93,6 +123,11 @@ def parse_source(raw: dict) -> SourceConfig:
         if value is not None and not isinstance(value, dict):
             raise SourceConfigError(f"[{source_id}] {key} 必须是对象")
 
+    max_age_days = raw.get("max_age_days")
+    if max_age_days is not None:
+        if not isinstance(max_age_days, int) or isinstance(max_age_days, bool) or max_age_days <= 0:
+            raise SourceConfigError(f"[{source_id}] max_age_days 必须是正整数（天数）")
+
     return SourceConfig(
         id=source_id,
         name=name,
@@ -109,6 +144,7 @@ def parse_source(raw: dict) -> SourceConfig:
         selectors=raw.get("selectors") or {},
         detail=raw.get("detail") or {},
         mapping=raw.get("mapping") or {},
+        max_age_days=max_age_days,
         raw=raw,
     )
 

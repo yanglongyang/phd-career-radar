@@ -14,7 +14,11 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from app.collectors.base import JobCollector, RawJob
-from app.collectors.config import SourceConfig, title_require_filter
+from app.collectors.config import (
+    SourceConfig,
+    extract_date_text,
+    title_require_filter,
+)
 from app.collectors.http import SafeFetcher
 
 
@@ -53,6 +57,24 @@ class HtmlListCollector(JobCollector):
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
+    def _extract_date_text(self, node, selectors: dict) -> str | None:
+        """从列表行提取发布日期的原始文本（仅取匹配到的日期串，便于展示）。
+
+        - date 选择器存在：取其文本，或 date_attr 指定的属性（北大日期在 title 属性里）；
+        - date 选择器缺失/取不到：扫描整行文本（华科日期嵌在 li 文本末尾）。"""
+        date_selector = selectors.get("date") or ""
+        date_attr = selectors.get("date_attr") or ""
+        raw: str | None = None
+        if date_selector:
+            target = node.select_one(date_selector)
+            if target is not None:
+                raw = target.get(date_attr) if date_attr else target.get_text(strip=True)
+        if not raw:
+            raw = node.get_text(strip=True)
+        if not raw:
+            return None
+        return extract_date_text(raw)
+
     def collect(self) -> list[RawJob]:
         selectors = self.source.selectors
         item_selector = selectors.get("item")
@@ -87,7 +109,7 @@ class HtmlListCollector(JobCollector):
             # 标题特征过滤：列表页可能混入导航/新闻，标题不含招聘特征词则跳过
             if not title_require_filter(title, require_words):
                 continue
-            date_raw = self._select_text(node, selectors.get("date") or "")
+            date_raw = self._extract_date_text(node, selectors)
 
             description = None
             if fetch_detail:

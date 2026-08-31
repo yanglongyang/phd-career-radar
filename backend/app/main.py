@@ -30,6 +30,11 @@ async def lifespan(_: FastAPI):
     # 测试通过 PCR_SKIP_STARTUP_DDL=1 跳过，避免触碰真实数据库文件。
     if os.environ.get("PCR_SKIP_STARTUP_DDL") != "1":
         Base.metadata.create_all(engine)
+        # 桌面版升级：create_all 不补已有表的缺失列，这里补普通列
+        # （主键/外键/唯一/索引列变更仍必须走 alembic，见 app/db/migrate.py）
+        from app.db.migrate import ensure_missing_columns
+
+        ensure_missing_columns(engine)
     yield
 
 

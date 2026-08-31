@@ -771,3 +771,119 @@ def test_ensure_sources_schema_migrates_legacy(monkeypatch, tmp_path):
     result2 = collector_config.ensure_sources_schema()
     assert result2["migrated"] is False
     assert _yaml.safe_load((user_dir / "config" / "sources.yaml").read_text(encoding="utf-8"))["collectors"] == []
+# ---------- 日期解析与过期过滤（V0.2.2） ----------
+
+def test_parse_date_from_text_formats():
+    from datetime import date
+
+    from app.collectors.config import parse_date_from_text
+
+    assert parse_date_from_text("2026.08.24") == date(2026, 8, 24)
+    assert parse_date_from_text("2023-07-05") == date(2023, 7, 5)
+    assert parse_date_from_text("发布日期：2016-11-29") == date(2016, 11, 29)
+    assert parse_date_from_text("2025年9月8日") == date(2025, 9, 8)
+    # 无完整日期（月日缺失）不误匹配
+    assert parse_date_from_text("2025年专任教师招聘启事") is None
+    assert parse_date_from_text("华中科技大学专任教师招聘启事2024-12-20") == date(2024, 12, 20)
+    assert parse_date_from_text("") is None
+    assert parse_date_from_text(None) is None
+    # 非法日期（2月30日）不抛异常
+    assert parse_date_from_text("2023-02-30") is None
+
+
+def test_parse_source_max_age_days_validation():
+    src = parse_source({"id": "a", "type": "json_api", "enabled": True,
+                        "url": "https://x", "max_age_days": 365})
+    assert src.max_age_days == 365
+    for bad in (0, -1, "365", 3.5, True):
+        with pytest.raises(Exception, match="max_age_days"):
+            parse_source({"id": "a", "type": "json_api", "enabled": True,
+                          "url": "https://x", "max_age_days": bad})
+
+
+def test_html_list_collector_pku_title_attr_date(monkeypatch):
+    """北大：真实公告在 li dl dd，日期在 a 的 title 属性里（发布日期：YYYY-MM-DD）。"""
+    html = """<html><body><ul class="mode2Ul">
+      <li><div class="mode2container"><div class="title2"><a class="tit" href="rczp/jxky/index.htm">教学科研</a></div>
+        <dl><dd><a class="gp-f16" href="rczp/jxky/abc.htm" title="2026年北京大学教学科研岗位招聘启事 发布日期：2026-02-14 ">2026年北京大学教学科研岗位招聘启事</a></dd>
+        <dd><a class="gp-f16" href="rczp/bsh/def.htm" title="博士后招聘信息请点此查看 发布日期：2016-11-29">博士后招聘信息请点此查看</a></dd></dl>
+      </div></li></ul></body></html>"""
+    src = SourceConfig(
+        id="pku", name="北大", type="html_list", enabled=True, url="https://hr.pku.edu.cn/",
+        organization="北京大学",
+        selectors={
+            "item": "ul.mode2Ul li dl dd", "title": "a", "link": "a",
+            "date": "a", "date_attr": "title",
+            "title_require_words": ["招聘", "博士后"],
+        },
+    )
+    collector = HtmlListCollector(src)
+
+    def fake_fetch(self, url, **kwargs):
+        return (src.url, "text/html", html)
+
+    monkeypatch.setattr(collector, "_fetcher", type("F", (), {"fetch": fake_fetch})())
+    jobs = collector.collect()
+    assert len(jobs) == 2
+    assert jobs[0].title == "2026年北京大学教学科研岗位招聘启事"
+    assert jobs[0].published_at_raw == "2026-02-14"
+    assert jobs[1].published_at_raw == "2016-11-29"
+
+
+def test_html_list_collector_hust_row_scan_date(monkeypatch):
+    """华科：日期嵌在 li 文本末尾，无 date 选择器时扫描整行文本。"""
+    html = """<html><body><ul class="ss">
+      <li><a href="rczp/zrjszp/1.htm">华中科技大学专任教师招聘启事</a>2023-07-05</li>
+      <li><a href="rczp/zrjszp/2.htm">华中科技大学同济医学院法医学系教师招聘启事</a>2026-01-29</li>
+    </ul></body></html>"""
+    src = SourceConfig(
+        id="hust", name="华科", type="html_list", enabled=True,
+        url="https://hr.hust.edu.cn/rczp/zrjszp.htm", organization="华中科技大学",
+        selectors={"item": "ul.ss li", "title": "a", "link": "a", "date": "",
+                   "title_require_words": ["招聘", "教师"]},
+    )
+    collector = HtmlListCollector(src)
+
+    def fake_fetch(self, url, **kwargs):
+        return (src.url, "text/html", html)
+
+    monkeypatch.setattr(collector, "_fetcher", type("F", (), {"fetch": fake_fetch})())
+    jobs = collector.collect()
+    assert len(jobs) == 2
+    assert jobs[0].published_at_raw == "2023-07-05"
+    assert jobs[1].published_at_raw == "2026-01-29"
+
+
+def test_runner_recency_filter_skips_old_jobs(client, db_session, monkeypatch):
+    """max_age_days=365：2016/2023 的旧岗位跳过（recency_skipped），近期岗位正常入库。"""
+    from app.models import DiscoveredJob
+    from app.services.collector_runner import run_collectors
+
+    def mk(title, url, job_id, date_raw):
+        from app.collectors.base import RawJob
+
+        return RawJob(
+            source_id="A", source_name="来源A", title=title,
+            source_job_id=job_id, source_url=url, organization_hint="测试大学",
+            published_at_raw=date_raw,
+        )
+
+    _fake_collector(
+        monkeypatch,
+        {"A": [mk("有机化学教师招聘", "https://a.com/jobs/1", "k1", "2026-08-10"),
+               mk("博士后招聘", "https://a.com/jobs/2", "k2", "2016-11-29"),
+               mk("研究员招聘", "https://a.com/jobs/3", "k3", "2023-07-05")]},
+    )
+    src = _src("A")
+    src.max_age_days = 365
+    run = run_collectors(db_session, [src])
+    db_session.commit()
+
+    rows = db_session.query(DiscoveredJob).all()
+    assert len(rows) == 1
+    assert rows[0].title_raw == "有机化学教师招聘"
+    assert run.recency_skipped_count == 2
+    assert run.filtered_count == 0
+    item = run.items[0]
+    assert item.recency_skipped_count == 2
+    assert item.new_count == 1

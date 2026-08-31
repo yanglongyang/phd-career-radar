@@ -140,6 +140,9 @@ export default function DiscoverPage() {
               <span>重复 <b className="tabular-nums">{lastRun.duplicate_count}</b></span>
               <span>疑似重复 <b className="text-amber-600">{lastRun.possible_duplicate_count}</b></span>
               <span>已过滤 <b className="tabular-nums">{lastRun.filtered_count}</b></span>
+              {lastRun.recency_skipped_count > 0 && (
+                <span>过期跳过 <b className="text-zinc-500">{lastRun.recency_skipped_count}</b></span>
+              )}
               <span>失败 <b className="text-red-600">{lastRun.failed_source_count}</b></span>
               <span>进度 {lastRun.completed_source_count} / {lastRun.source_count}</span>
             </div>
@@ -153,6 +156,7 @@ export default function DiscoverPage() {
                       <span className="text-zinc-400">
                         {it.new_count} 新增 / {it.duplicate_count} 已存在
                         {it.filtered_count ? ` / 过滤 ${it.filtered_count}` : ""}
+                        {it.recency_skipped_count ? ` / 过期跳过 ${it.recency_skipped_count}` : ""}
                       </span>
                     ) : it.status === "failed" ? (
                       <span className="text-red-500">{it.error_message ?? "失败"}</span>

@@ -23,6 +23,7 @@ class CollectorRunSummary(BaseModel):
     duplicate_count: int
     possible_duplicate_count: int
     filtered_count: int
+    recency_skipped_count: int
     failed_source_count: int
 
 
@@ -38,6 +39,7 @@ class CollectorRunItemOut(BaseModel):
     duplicate_count: int
     possible_duplicate_count: int
     filtered_count: int
+    recency_skipped_count: int
     error_message: str | None = None
 
 

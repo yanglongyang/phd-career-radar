@@ -1,6 +1,7 @@
 # 招聘信息来源配置（V0.2 Collector MVP）
 # CollectorRegistry/runner 读取 enabled 清单；真实爬虫仅 JsonApiCollector / HtmlListCollector。
-# 关键词过滤为确定性 pre-filter；title_require_words 过滤混入列表页的导航/新闻动态。
+# 关键词过滤为确定性 pre-filter；title_require_words 过滤混入列表页的导航/新闻动态；
+# max_age_days 按列表发布日期跳过过期旧岗位（很多高校列表页新旧混排，2023/2016 的都有）。
 # schema_version 必须保留：程序据此区分 V0.1.1 legacy 空配置（自动迁移）与
 # 用户主动清空（尊重，不恢复默认）。
 schema_version: 2
@@ -15,6 +16,7 @@ collectors:
     url: https://join.sjtu.edu.cn/Admin/ZPSpecialList.aspx?name=1
     request:
       timeout_seconds: 20
+    max_age_days: 365
     selectors:
       item: "tr"
       title: "td:nth-of-type(2) a"
@@ -36,6 +38,7 @@ collectors:
     url: https://join.sjtu.edu.cn/Admin/ZPSpecialList.aspx?name=5
     request:
       timeout_seconds: 20
+    max_age_days: 365
     selectors:
       item: "tr"
       title: "td:nth-of-type(2) a"
@@ -57,6 +60,7 @@ collectors:
     url: https://hr.hust.edu.cn/rczp/zrjszp.htm
     request:
       timeout_seconds: 20
+    max_age_days: 365
     selectors:
       item: "ul.ss li"
       title: "a"
@@ -78,17 +82,21 @@ collectors:
     url: https://hr.pku.edu.cn/
     request:
       timeout_seconds: 20
+    max_age_days: 365
     selectors:
-      item: "ul.mode2Ul li"
+      # 首页 mode2Ul 是频道聚合：每条 li 的 dl dd 才是真实公告；
+      # 分类标签（教学科研/行政教辅）在 title2 a 里，不在 dd 中。
+      item: "ul.mode2Ul li dl dd"
       title: "a"
       link: "a"
-      date: ""
+      date: "a"
+      date_attr: "title"   # 日期在 a 的 title 属性里："… 发布日期：2026-02-14"
       title_require_words: [招聘, 诚聘, 教师, 教授, 岗位, 人才, 引进, 博士后]
     detail:
       fetch_detail: false
     filters:
       include_keywords: [化学, 药学, 生物, 医学, 材料, 教师, 教授, 研究员, 博士后, 人才]
-      exclude_keywords: [辅导员, 行政, 值班]
+      exclude_keywords: [辅导员, 行政, 值班, 公示, 面试名单, 名单, 请点此查看]
 
   - id: fudan_hr
     name: 复旦大学人事处

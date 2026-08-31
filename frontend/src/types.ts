@@ -408,6 +408,7 @@ export interface CollectorRunItem {
   duplicate_count: number;
   possible_duplicate_count: number;
   filtered_count: number;
+  recency_skipped_count: number;
   error_message: string | null;
 }
 
@@ -424,6 +425,7 @@ export interface CollectorRun {
   duplicate_count: number;
   possible_duplicate_count: number;
   filtered_count: number;
+  recency_skipped_count: number;
   failed_source_count: number;
   items: CollectorRunItem[];
 }
