@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
@@ -76,7 +76,10 @@ def mount_static(target_app: FastAPI, dist_dir: Path) -> None:
 
     @target_app.get("/{path:path}", include_in_schema=False)
     def spa_fallback(path: str):
-        """非 /api 路径全部回退到 index.html（React Router 前端路由）。"""
+        """React Router 前端路由回退到 index.html；
+        /api 路径**绝不**由 SPA 接住 —— 未知 API 返回 404（而不是 index.html 200）。"""
+        if path == "api" or path.startswith("api/"):
+            return Response(status_code=404)
         return FileResponse(index)
 
 

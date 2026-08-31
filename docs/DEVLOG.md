@@ -830,3 +830,35 @@ ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e77
 - GUI 的交互（按钮/日志/自动打开浏览器）为 Tkinter 实现，自动化冒烟验证的是
   `--serve` 后端与 ProcessManager 生命周期；GUI 视觉由用户首次双击确认；
 - 开发模式（uvicorn --reload + npm run dev）完整保留。
+
+---
+
+## V0.1.1 Final Closure（2026-08-31 完成）
+
+四项边界 + GUI 线程收尾，Launcher 达到"每天使用的入口"标准。
+
+1. **SPA fallback 不吞 /api**：catch-all 对 `api` / `api/*` 直接 404 ——
+   未知 API 不再返回 index.html 200。回归：`/jobs/1 → 200`、`/api/not-exist → 404`。
+2. **可复现构建**：`backend/launcher.spec` 提交入库（改用 `Path.cwd()` 推导项目根，
+   从 backend 目录运行即可在任何 clone 上复现）；`.gitignore` 改为
+   `*.spec` + `!backend/launcher.spec`。
+3. **frozen 资源/用户配置分离**：RESOURCE_ROOT（_MEIPASS：前端、默认 config、Prompts）
+   ≠ USER_ROOT（exe 旁：`.env`、config/、data/）。首次运行 `seed_user_config()` 从
+   bundled 默认配置复制缺失的 YAML（不覆盖已存在文件）；Settings 永远编辑 exe 旁用户配置；
+   `.env` 从 exe 旁读取。exe 冒烟验证：全新目录下 4 个 YAML 种子化、数据库创建于 exe 旁。
+4. **stale PID 身份校验**：PID 文件升级为 JSON {pid, created_at_marker, port}；
+   清理前用 `GetProcessTimes`（Windows）/ `/proc`（Linux）校验进程创建时间与记录一致——
+   不一致（PID 被系统复用）只删文件，**绝不 kill 无辜进程**；旧纯数字格式同样保守处理。
+   测试：身份匹配 → 清理；创建时间不一致 → 不 kill 只删文件；旧格式 → 不 kill。
+5. **GUI 线程修复**：health 检查在后台线程完成，结果经 `root.after` 回主线程更新
+   日志/状态/自动开浏览器；失败显示"启动失败：/api/health 超时未响应"。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**178 passed**（+3：SPA 404、frozen 种子化、PID 复用防护 ×2/旧格式）；
+  vitest：17 passed；ruff：All checks passed；前端 build：通过；
+  exe 重新打包并冒烟（health/SPA/SPA 路由/未知 API 404/配置种子化/数据落 exe 旁）。

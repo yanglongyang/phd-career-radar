@@ -47,6 +47,9 @@ def test_spa_served_when_dist_exists(tmp_path):
         assert c.get("/assets/app.js").status_code == 200
         # API 不受影响
         assert c.get("/api/health").status_code == 200
+        # V0.1.1：未知 API 路径绝不由 SPA 接住 —— 404 而不是 index.html 200
+        assert c.get("/api/not-exist").status_code == 404
+        assert c.get("/api").status_code == 404
 
 
 def test_mount_static_noop_without_dist(tmp_path):
@@ -120,23 +123,34 @@ def test_process_manager_pid_file_lifecycle(monkeypatch, tmp_path):
     assert manager.proc is None
 
 
-def test_process_manager_stale_detection_and_kill(monkeypatch, tmp_path):
+def test_process_manager_stale_detection_with_identity(monkeypatch, tmp_path):
+    """V0.1.1：JSON PID 记录 + 创建时间身份校验 —— 匹配才清理。"""
+    import json as _json
+
     launcher_mod = _load_launcher()
     ProcessManager = launcher_mod.ProcessManager
 
     pid_file = tmp_path / "backend.pid"
     manager = ProcessManager(pid_file=pid_file, port=8124)
-    pid_file.write_text("99999", encoding="utf-8")
+    marker = 1234567890.0
+    pid_file.write_text(
+        _json.dumps({"pid": 99999, "created_at_marker": marker, "port": 8124}),
+        encoding="utf-8",
+    )
 
     killed = []
 
     def fake_is_alive(pid):
         return pid == 99999
 
+    def fake_creation(pid):
+        return marker if pid == 99999 else None
+
     def fake_kill_tree(pid):
         killed.append(pid)
 
     monkeypatch.setattr(launcher_mod, "_is_alive", fake_is_alive)
+    monkeypatch.setattr(launcher_mod, "_process_creation_time", fake_creation)
     monkeypatch.setattr(ProcessManager, "_kill_tree", staticmethod(fake_kill_tree))
 
     assert manager.stale_pid() == 99999
@@ -144,6 +158,64 @@ def test_process_manager_stale_detection_and_kill(monkeypatch, tmp_path):
     assert cleaned == 99999
     assert killed == [99999]
     assert not pid_file.exists()  # 清理后 pid 文件删除
+
+
+def test_process_manager_reused_pid_not_killed(monkeypatch, tmp_path):
+    """V0.1.1 核心防护：PID 被系统复用（创建时间不一致）→ 只删文件，绝不 kill。"""
+    import json as _json
+
+    launcher_mod = _load_launcher()
+    ProcessManager = launcher_mod.ProcessManager
+
+    pid_file = tmp_path / "backend.pid"
+    manager = ProcessManager(pid_file=pid_file, port=8125)
+    pid_file.write_text(
+        _json.dumps({"pid": 99999, "created_at_marker": 1111111111.0, "port": 8125}),
+        encoding="utf-8",
+    )
+
+    killed = []
+
+    def fake_is_alive(pid):
+        return pid == 99999  # 进程存在，但……
+
+    def fake_creation(pid):
+        return 2222222222.0  # ……创建时间与记录不一致（PID 已被复用）
+
+    def fake_kill_tree(pid):
+        killed.append(pid)
+
+    monkeypatch.setattr(launcher_mod, "_is_alive", fake_is_alive)
+    monkeypatch.setattr(launcher_mod, "_process_creation_time", fake_creation)
+    monkeypatch.setattr(ProcessManager, "_kill_tree", staticmethod(fake_kill_tree))
+
+    assert manager.stale_pid() is None          # 不视为残留
+    assert manager.is_running() is False        # 也不算运行中
+    cleaned = manager.cleanup_stale()
+    assert cleaned is None                      # 不清理（不 kill）
+    assert killed == []                         # 无辜进程未被杀
+    assert not pid_file.exists()                # 只删除过期的 pid 文件
+
+
+def test_process_manager_legacy_plain_pid_not_killed(monkeypatch, tmp_path):
+    """旧纯数字 PID 文件无身份信息 → 保守：只删文件，不 kill。"""
+    launcher_mod = _load_launcher()
+    ProcessManager = launcher_mod.ProcessManager
+
+    pid_file = tmp_path / "backend.pid"
+    manager = ProcessManager(pid_file=pid_file, port=8126)
+    pid_file.write_text("99999", encoding="utf-8")
+
+    killed = []
+    monkeypatch.setattr(launcher_mod, "_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        ProcessManager, "_kill_tree", staticmethod(lambda pid: killed.append(pid))
+    )
+
+    assert manager.stale_pid() is None
+    manager.cleanup_stale()
+    assert killed == []
+    assert not pid_file.exists()
 
 
 def test_process_manager_kill_tree_uses_taskkill_on_windows(monkeypatch):
@@ -162,3 +234,25 @@ def test_process_manager_kill_tree_uses_taskkill_on_windows(monkeypatch):
     ProcessManager._kill_tree(1234)
     assert calls and calls[0][:3] == ["taskkill", "/PID", "1234"]
     assert "/T" in calls[0] and "/F" in calls[0]
+
+
+def test_frozen_user_config_seeded_from_bundle(tmp_path):
+    """V0.1.1：frozen 模式首次运行把 bundled 默认配置复制到用户目录（只复制缺失文件）。"""
+    from app.core.config import seed_user_config
+
+    resource = tmp_path / "bundle" / "config"
+    user_config = tmp_path / "user" / "config"
+    resource.mkdir(parents=True)
+    user_config.mkdir(parents=True)
+    (resource / "scoring.yaml").write_text("scoring: {fit: 20}", encoding="utf-8")
+    (resource / "regions.yaml").write_text("preferred: []", encoding="utf-8")
+
+    seed_user_config(resource, user_config)
+    # 缺失的文件被复制
+    assert (user_config / "scoring.yaml").exists()
+    assert (user_config / "regions.yaml").exists()
+
+    # 已存在的用户文件不被覆盖（更新程序不覆盖个人配置）
+    (user_config / "regions.yaml").write_text("preferred: [南京]", encoding="utf-8")
+    seed_user_config(resource, user_config)
+    assert "南京" in (user_config / "regions.yaml").read_text(encoding="utf-8")

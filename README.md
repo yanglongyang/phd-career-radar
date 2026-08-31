@@ -61,10 +61,13 @@ phd-career-radar/
 - 后端以**无 --reload** 模式启动，前端由 FastAPI 直接托管构建产物（`frontend/dist`），
   **日常运行不需要 Vite/Node 进程**；
 - 关闭启动器 → 优雅终止 → 强制清理整个子进程树（`taskkill /T /F`），不残留进程；
-- 启动时自动检测上次异常残留的 PID 并清理；
-- 数据（SQLite、PID 文件）保存在 exe 同目录的 `data/`。
+- 启动时自动检测上次异常残留的 PID 并清理；PID 文件含进程创建时间戳，
+  **PID 被系统重用时只删文件、绝不误杀无辜进程**；
+- 程序资源（前端、默认配置、Prompts）随 exe 内置；**用户配置、.env、SQLite、PID 文件
+  都在 exe 同目录**（config/ 与 data/，首次运行自动从内置默认配置种子化；
+  更新程序不会覆盖个人权重/地区偏好）。
 
-重新打包（需要 Python 3.11+ 与 PyInstaller）：
+重新打包（需要 Python 3.11+ 与 PyInstaller；`launcher.spec` 已入库，从 backend 目录运行即可复现）：
 
 ```bash
 cd backend
