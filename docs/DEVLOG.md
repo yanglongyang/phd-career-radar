@@ -787,3 +787,46 @@ ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e77
 
 真实 Collector 爬虫、Evidence selection/ranking、申请历史时间线、applied_at
 显式编辑、多用户/权限、Redis/Kafka/微服务、GitHub Actions CI。
+
+---
+
+## V0.1.1 — Local Launcher（2026-08-31 完成）
+
+把 V0.1 从"开发项目"变成"每天愿意打开的软件"：日常使用不再依赖终端 + Vite。
+
+### 已实现
+
+1. **FastAPI 托管 React 静态产物**：`main.mount_static()` 在 `frontend/dist` 存在时
+   提供 index.html + assets，非 /api 路径全部回退 index.html（React Router 前端路由）；
+   dist 不存在（开发模式）行为不变。**日常运行零 Vite/Node 进程**。
+2. **`launcher/launcher.py`（Tkinter）**：
+   - 后端以**无 --reload** 方式启动（subprocess 单进程），stdout/stderr 实时进日志框；
+   - PID 持久化到 `data/backend.pid`；停止/关闭 → 优雅 terminate → 超时强制
+     `taskkill /PID <pid> /T /F` 清理整个进程树 → 删除 PID 文件；
+   - 启动时检测上次异常残留 PID → 提示并清理；
+   - 启动成功（轮询 /api/health 按实际端口）后自动打开浏览器；
+   - `--serve` 分支供自身 subprocess 复用与冒烟验证。
+3. **打包感知**：`config.py` frozen 时资源目录 = `_MEIPASS`（config/、前端静态、
+   Prompts），数据目录 = exe 旁 `data/`（自动创建）；launcher 的 PID 文件同样放 exe 旁。
+4. **PyInstaller 打包**（`launcher.spec`，onedir）：`dist/PhD Career Radar/PhD Career Radar.exe`
+   已生成并验证 —— `--serve` 模式下 /api/health 200、SPA 页面 200、前端路由回退 200、
+   数据库文件创建于 exe 旁。
+5. **测试**：静态托管（临时 dist 挂载 / 无 dist noop）、ProcessManager（PID 生命周期、
+   残留检测与清理、Windows taskkill /T /F）；真实进程级验证（start → health → stop →
+   pid 文件清理、残留伪造检测）。
+
+### 数据库变化
+
+- 无（v0.1.1 为交付层改动）。
+
+### 测试 / lint / build
+
+- pytest：**175 passed**（+5：mount_static 两例、ProcessManager 三例）；vitest：17 passed；
+  ruff：All checks passed；前端 build：通过；exe 冒烟：通过。
+
+### 说明与边界
+
+- 打包使用 onedir（首次启动快）；`dist/`、`build/` 已加入 .gitignore，不入库；
+- GUI 的交互（按钮/日志/自动打开浏览器）为 Tkinter 实现，自动化冒烟验证的是
+  `--serve` 后端与 ProcessManager 生命周期；GUI 视觉由用户首次双击确认；
+- 开发模式（uvicorn --reload + npm run dev）完整保留。

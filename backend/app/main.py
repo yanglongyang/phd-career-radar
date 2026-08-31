@@ -1,8 +1,11 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     applications,
@@ -15,7 +18,7 @@ from app.api.routes import (
 from app.api.routes import (
     settings as settings_routes,
 )
-from app.core.config import get_settings
+from app.core.config import PROJECT_ROOT, get_settings
 from app.db.base import Base
 from app.db.session import engine
 
@@ -53,3 +56,28 @@ app.include_router(settings_routes.router, prefix="/api")
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": settings.app_name, "version": "0.1.0"}
+
+
+# ---- 静态托管（V0.1.1）：frontend/dist 存在时由 FastAPI 直接提供 React SPA ----
+# 日常运行不再需要 Vite/Node 进程；开发模式（dist 不存在）行为不变。
+DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+
+
+def mount_static(target_app: FastAPI, dist_dir: Path) -> None:
+    """把 React SPA（index.html + assets）挂到目标 app；dist 不存在时静默跳过。"""
+    index = dist_dir / "index.html"
+    if not (dist_dir.is_dir() and index.exists()):
+        return
+    target_app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
+
+    @target_app.get("/", include_in_schema=False)
+    def index_page():
+        return FileResponse(index)
+
+    @target_app.get("/{path:path}", include_in_schema=False)
+    def spa_fallback(path: str):
+        """非 /api 路径全部回退到 index.html（React Router 前端路由）。"""
+        return FileResponse(index)
+
+
+mount_static(app, DIST_DIR)

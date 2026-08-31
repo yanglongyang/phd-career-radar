@@ -49,7 +49,39 @@ phd-career-radar/
 └── README.md
 ```
 
-## 安装与开发运行
+## 运行方式（两种模式）
+
+### 日常使用（推荐）：Launcher
+
+```text
+双击 dist/PhD Career Radar/PhD Career Radar.exe
+```
+
+- Tkinter 启动器：后端状态 / PID / 实时日志 / 启动停止重启 / 自动打开浏览器；
+- 后端以**无 --reload** 模式启动，前端由 FastAPI 直接托管构建产物（`frontend/dist`），
+  **日常运行不需要 Vite/Node 进程**；
+- 关闭启动器 → 优雅终止 → 强制清理整个子进程树（`taskkill /T /F`），不残留进程；
+- 启动时自动检测上次异常残留的 PID 并清理；
+- 数据（SQLite、PID 文件）保存在 exe 同目录的 `data/`。
+
+重新打包（需要 Python 3.11+ 与 PyInstaller）：
+
+```bash
+cd backend
+.venv/Scripts/python -m pip install pyinstaller
+.venv/Scripts/python -m PyInstaller launcher.spec --noconfirm --distpath ../dist --workpath ../build
+```
+
+### 开发模式（完整保留）
+
+```text
+后端：cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload
+前端：cd frontend && npm run dev        # http://localhost:5173，/api 代理到 8000
+```
+
+日常模式与开发模式互不影响：前端 `npm run build` 后日常模式自动生效。
+
+## 安装与开发运行（依赖准备）
 
 要求：Python 3.11+（推荐 3.12）、Node 18+。
 

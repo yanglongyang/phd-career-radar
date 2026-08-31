@@ -1,15 +1,32 @@
-"""全局配置：环境变量（.env）+ config/*.yaml 加载。"""
+"""全局配置：环境变量（.env）+ config/*.yaml 加载。
 
+打包感知（V0.1.1）：PyInstaller 打包后（sys.frozen）——
+- 资源目录（config/、前端静态文件、AI Prompts）位于 _MEIPASS（只读，随 exe 分发）；
+- 数据目录（SQLite、pid 文件）位于 exe 同目录的 data/（可写，用户数据持久）。
+未打包时保持仓库布局不变。"""
+
+import sys
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# backend/app/core/config.py -> 项目根目录
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包：资源在 _MEIPASS，数据在 exe 旁
+    _BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    _DATA_DIR = Path(sys.executable).parent / "data"
+    PROJECT_ROOT = _BUNDLE_DIR
+else:
+    # backend/app/core/config.py -> 项目根目录
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    _DATA_DIR = PROJECT_ROOT / "data"
+
 CONFIG_DIR = PROJECT_ROOT / "config"
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = _DATA_DIR
+if getattr(sys, "frozen", False):
+    # 打包环境：数据目录在 exe 旁且需要可写，确保存在
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings(BaseSettings):
