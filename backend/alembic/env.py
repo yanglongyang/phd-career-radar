@@ -2,12 +2,12 @@
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401  确保所有模型注册到 metadata
+from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
-import app.models  # noqa: F401  确保所有模型注册到 metadata
 
 config = context.config
 

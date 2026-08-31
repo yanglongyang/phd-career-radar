@@ -5,9 +5,9 @@ Revises: d281b97059b5
 Create Date: 2026-08-31 15:40:31.027981
 
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = '937a152aeca9'
 down_revision = 'd281b97059b5'
@@ -63,7 +63,10 @@ def upgrade() -> None:
     with op.batch_alter_table('discovered_jobs', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_discovered_jobs_canonical_url'), ['canonical_url'], unique=True)
         batch_op.create_index(batch_op.f('ix_discovered_jobs_fingerprint'), ['fingerprint'], unique=False)
-        batch_op.create_index(batch_op.f('ix_discovered_jobs_possible_duplicate_of_id'), ['possible_duplicate_of_id'], unique=False)
+        batch_op.create_index(
+            batch_op.f('ix_discovered_jobs_possible_duplicate_of_id'),
+            ['possible_duplicate_of_id'], unique=False,
+        )
         batch_op.create_index(batch_op.f('ix_discovered_jobs_source_id'), ['source_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_discovered_jobs_status'), ['status'], unique=False)
 
