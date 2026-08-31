@@ -30,19 +30,36 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def run_collectors(db: Session, sources: list[SourceConfig]) -> CollectorRun:
+def run_collectors(
+    db: Session, sources: list[SourceConfig], config_errors: list[dict] | None = None
+) -> CollectorRun:
     """执行一次完整采集。逐 source 独立事务；返回 CollectorRun（含 items）。
 
-    注意：调用方负责最终 commit（本函数用 savepoint 隔离单 source 失败，
-    保证"Source A 成功 → B 失败 → C 成功"时 A/C 数据保留）。"""
+    config_errors（P0-1）：配置解析失败的 source 也建 failed item，
+    不阻塞其他正常 source。调用方负责最终 commit。"""
+    config_errors = config_errors or []
     run = CollectorRun(
         started_at=_now(),
         status="running",
         trigger="manual",
-        source_count=len(sources),
+        source_count=len(sources) + len(config_errors),
     )
     db.add(run)
     db.flush()
+
+    for err in config_errors:
+        item = CollectorRunItem(
+            run_id=run.id,
+            source_id=err.get("source_id", "?"),
+            source_name=err.get("name", err.get("source_id", "?")),
+            started_at=_now(),
+            finished_at=_now(),
+            status="failed",
+            error_message=str(err.get("error", "配置错误"))[:500],
+        )
+        db.add(item)
+        run.failed_source_count += 1
+        db.flush()
 
     for source in sources:
         item = CollectorRunItem(
@@ -76,7 +93,8 @@ def run_collectors(db: Session, sources: list[SourceConfig]) -> CollectorRun:
         db.flush()
 
     run.finished_at = _now()
-    run.completed_source_count = sum(1 for i in run.items if i.status == "success")
+    # P1-4：completed = success + failed + skipped（运行已结束就应显示完成）
+    run.completed_source_count = sum(1 for i in run.items if i.status != "running")
     run.status = (
         "failed"
         if run.completed_source_count == 0 and run.source_count > 0
@@ -141,12 +159,16 @@ def _persist_source(
             stats["duplicate"] += 1
             continue
 
-        # Level 4：possible duplicate —— 同单位 + 标题高度相似 + URL 不同 → 只标记
+        # Level 4：possible duplicate —— 同单位 + 标题高度相似 + URL 不同 → 只标记。
+        # 单位以 raw.organization_hint or source.organization 为准；
+        # 单位未知（两者皆空）不执行基于组织的 possible 判定（P1-5，避免
+        # aggregator 上"所有 org=NULL 材料"互相误标）。
         possible_of: DiscoveredJob | None = None
-        if raw.title:
+        new_org = raw.organization_hint or source.organization
+        if raw.title and new_org:
             same_org_rows = db.scalars(
                 select(DiscoveredJob).where(
-                    DiscoveredJob.organization_hint == source.organization,
+                    DiscoveredJob.organization_hint == new_org,
                 )
             ).all()
             for row in same_org_rows:

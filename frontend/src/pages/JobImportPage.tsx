@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, extractPreview } from "../services/api";
+import { linkDiscoveredJob } from "../services/api";
 import type { ExtractionPreview, JobDetail } from "../types";
 import { buildSavePayload, seedValuesFromPreview, type FieldValue } from "../lib/extraction";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, PageHeader, Select, Textarea } from "../components/ui";
@@ -112,9 +113,21 @@ export default function JobImportPage() {
   const saveMutation = useMutation({
     mutationFn: (payload: ReturnType<typeof buildSavePayload>) =>
       api<JobDetail>("/jobs", { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: (job) => {
+    onSuccess: async (job) => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      // P0-2B：来自 Inbox 的解析 → Save 后回写 imported + imported_job_id
+      const inbox = sessionStorage.getItem("pcr-inbox-source-id");
+      if (inbox) {
+        sessionStorage.removeItem("pcr-inbox-source-id");
+        const sourceId = Number(inbox);
+        try {
+          await linkDiscoveredJob(sourceId, job.id);
+          queryClient.invalidateQueries({ queryKey: ["discovered"] });
+        } catch {
+          // 回写失败不阻塞跳转；Inbox 条目保持 reviewing，用户可重试
+        }
+      }
       navigate(`/jobs/${job.id}`);
     },
     onError: (err) => {

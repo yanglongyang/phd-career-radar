@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urljoin
 
 from app.collectors.base import JobCollector, RawJob
 from app.collectors.config import SourceConfig
@@ -38,6 +39,17 @@ class JsonApiCollector(JobCollector):
             user_agent=source.request.user_agent, max_bytes=source.request.max_bytes
         )
 
+    @staticmethod
+    def _resolve_url(url: str | None, base: str) -> str | None:
+        """相对 URL 基于 fetch 返回的 final_url resolve（P1-3）；
+        只接受 http/https，拒绝 javascript:/mailto: 等进入可点击链接。"""
+        if not url:
+            return None
+        resolved = urljoin(base, url)
+        if not (resolved.startswith("http://") or resolved.startswith("https://")):
+            return None
+        return resolved
+
     def _field(self, item: dict, key: str) -> str | None:
         value = dotted_get(item, self.source.mapping.get(key, ""))
         if value is None:
@@ -50,7 +62,7 @@ class JsonApiCollector(JobCollector):
         if not items_path:
             raise ValueError(f"[{self.source.id}] mapping.items 缺失")
 
-        _, _, body = self._fetcher.fetch(
+        final_url, _, body = self._fetcher.fetch(
             self.source.url,
             timeout=self.source.request.timeout_seconds,
             content_types=("json", "text"),
@@ -70,7 +82,7 @@ class JsonApiCollector(JobCollector):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            url = self._field(item, "url")
+            url = self._resolve_url(self._field(item, "url"), final_url)
             results.append(
                 RawJob(
                     source_id=self.source.id,

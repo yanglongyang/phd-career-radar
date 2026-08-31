@@ -1,11 +1,12 @@
 """Collector API（V0.2）：立即检查 / 运行历史 / Inbox 审核 / AI Extraction bridge。"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_ai_provider
-from app.collectors.config import load_enabled_sources, load_sources
+from app.collectors.config import ensure_sources_schema, load_enabled_sources, load_sources
 from app.db.session import get_db
 from app.models import CollectorRun, DiscoveredJob
 from app.schemas.collector import (
@@ -81,12 +82,13 @@ def _discovered_to_out(d: DiscoveredJob) -> DiscoveredJobOut:
 
 @router.post("/collectors/run", response_model=CollectorRunOut)
 def run_collectors(db: Session = Depends(get_db)):
-    """立即执行一次 enabled sources（同步执行，返回完整 summary 含 source 级状态）。"""
-    try:
-        sources = load_enabled_sources()
-    except Exception as e:  # noqa: BLE001 —— 配置错误明确报错
-        raise HTTPException(status_code=422, detail=f"sources.yaml 配置错误：{e}") from e
-    run = collector_runner.run_collectors(db, sources)
+    """立即执行一次 enabled sources（同步执行）。
+
+    P0-1：配置错误的 source 也建 failed item，不阻塞其他正常 source。
+    P1-7：legacy 空 sources.yaml 先迁移到 V0.2 默认（已有版本/用户主动清空尊重）。"""
+    ensure_sources_schema()
+    sources, config_errors = load_enabled_sources()
+    run = collector_runner.run_collectors(db, sources, config_errors=config_errors)
     db.commit()
     db.refresh(run)
     return _run_to_out(run)
@@ -116,23 +118,23 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 
 @router.get("/collectors/sources")
 def list_source_configs():
-    """展示 sources.yaml 当前配置（含 enabled 状态）。"""
-    try:
-        sources = load_sources()
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=422, detail=f"sources.yaml 配置错误：{e}") from e
-    return [
-        {
-            "id": s.id,
-            "name": s.name,
-            "type": s.type,
-            "enabled": s.enabled,
-            "category": s.category,
-            "organization": s.organization,
-            "url": s.url,
-        }
-        for s in sources
-    ]
+    """展示 sources.yaml 当前配置（含 enabled 状态与配置错误）。"""
+    sources, errors = load_sources()
+    return {
+        "sources": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "type": s.type,
+                "enabled": s.enabled,
+                "category": s.category,
+                "organization": s.organization,
+                "url": s.url,
+            }
+            for s in sources
+        ],
+        "config_errors": errors,
+    }
 
 
 @router.get("/discovered-jobs", response_model=DiscoveredJobListPage)
@@ -180,6 +182,12 @@ def update_discovered(job_id: int, payload: DiscoveredJobUpdate, db: Session = D
     if row is None:
         raise HTTPException(status_code=404, detail=f"招聘材料不存在: {job_id}")
     if payload.status is not None:
+        if payload.status == "imported":
+            # P0-2B：imported 只能由 link-imported-job 专用 API 回写
+            raise HTTPException(
+                status_code=422,
+                detail="status=imported 只能通过 POST /discovered-jobs/{id}/link-imported-job 设置",
+            )
         row.status = payload.status
     db.commit()
     db.refresh(row)
@@ -202,12 +210,49 @@ def extract_discovered(job_id: int, db: Session = Depends(get_db), provider=Depe
     text = row.description_raw or row.title_raw or ""
     if len(text.strip()) < 10:
         raise HTTPException(status_code=422, detail="该招聘材料缺少可解析的正文（未抓取 detail）")
-    from app.api.routes.jobs import extract_preview
-    from app.schemas.extraction import ExtractionRequest
+    from app.ai.provider import AIError
+    from app.schemas.extraction import ExtractionPreviewOut
 
-    preview = extract_preview(ExtractionRequest(text=text.strip()), provider)
-    # 状态推进：new/possible_duplicate → reviewing（用户开始处理）
+    try:
+        extraction, prompt_version = provider.extract_job(text.strip())
+    except AIError as e:
+        raise HTTPException(status_code=502, detail=f"AI 解析失败：{e}") from e
+    preview = ExtractionPreviewOut(
+        # P0-2A：保留来源 provenance —— 原始招聘 URL 不被降级成普通粘贴文本
+        source_type="url",
+        source_url=row.source_url,
+        source_text=text.strip(),
+        extraction=extraction,
+        provider=provider.name,
+        model=getattr(provider, "model", None),
+        prompt_version=prompt_version,
+    )
     if row.status in ("new", "possible_duplicate"):
         row.status = "reviewing"
         db.commit()
     return preview
+
+
+class LinkImportedPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    job_id: int
+
+
+@router.post("/discovered-jobs/{job_id}/link-imported-job")
+def link_imported_job(job_id: int, payload: LinkImportedPayload, db: Session = Depends(get_db)):
+    """P0-2B：用户确认 Save 正式 Job 后，由专用 API 幂等回写
+    status=imported + imported_job_id；普通 PATCH 不允许伪造 imported。"""
+    row = db.get(DiscoveredJob, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"招聘材料不存在: {job_id}")
+    from app.models import Job
+
+    job = db.get(Job, payload.job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"正式岗位不存在: {payload.job_id}")
+    row.status = "imported"
+    row.imported_job_id = payload.job_id
+    db.commit()
+    db.refresh(row)
+    return _discovered_to_out(row)

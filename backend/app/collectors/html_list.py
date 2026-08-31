@@ -27,12 +27,7 @@ class HtmlListCollector(JobCollector):
             user_agent=source.request.user_agent, max_bytes=source.request.max_bytes
         )
 
-    def _soup(self, url: str) -> BeautifulSoup:
-        _, _, body = self._fetcher.fetch(
-            url,
-            timeout=self.source.request.timeout_seconds,
-            content_types=("html", "text"),
-        )
+    def _soup_from_body(self, body: str) -> BeautifulSoup:
         return BeautifulSoup(body, "html.parser")
 
     def _select_text(self, node, selector: str) -> str | None:
@@ -64,12 +59,13 @@ class HtmlListCollector(JobCollector):
         if not item_selector:
             raise ValueError(f"[{self.source.id}] selectors.item 缺失")
 
-        final_url, _, _ = self._fetcher.fetch(
+        # cleanup 10：一次 GET 拿回 body，直接解析（不再重复请求列表页）
+        final_url, _, body = self._fetcher.fetch(
             self.source.url,
             timeout=self.source.request.timeout_seconds,
             content_types=("html", "text"),
         )
-        soup = self._soup(self.source.url)
+        soup = self._soup_from_body(body)
         items = soup.select(item_selector)
         if not items:
             return []
@@ -90,7 +86,12 @@ class HtmlListCollector(JobCollector):
             description = None
             if fetch_detail:
                 try:
-                    detail_soup = self._soup(url)
+                    _, _, detail_body = self._fetcher.fetch(
+                        url,
+                        timeout=self.source.request.timeout_seconds,
+                        content_types=("html", "text"),
+                    )
+                    detail_soup = self._soup_from_body(detail_body)
                     content_node = detail_soup.select_one(content_selector) if content_selector else None
                     description = (
                         self._clean_text(str(content_node)) if content_node is not None else None

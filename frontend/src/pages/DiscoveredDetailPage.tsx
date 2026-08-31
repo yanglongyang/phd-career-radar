@@ -39,6 +39,7 @@ export default function DiscoveredDetailPage() {
     mutationFn: () => extractDiscoveredJob(Number(id)),
     onSuccess: (preview) => {
       sessionStorage.setItem("pcr-inbox-preview", JSON.stringify({ preview, sourceId: Number(id) }));
+      sessionStorage.setItem("pcr-inbox-source-id", String(id));
       window.location.href = "/jobs/import?from=inbox";
     },
   });

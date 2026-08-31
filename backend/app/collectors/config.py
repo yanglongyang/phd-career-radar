@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.core.config import load_yaml_config
+import yaml
+
+from app.core.config import CONFIG_DIR
 
 KNOWN_TYPES = {"json_api", "html_list"}
 
@@ -102,17 +104,85 @@ def parse_source(raw: dict) -> SourceConfig:
     )
 
 
-def load_sources() -> list[SourceConfig]:
-    """读取 sources.yaml 全部 source（含禁用项，由 runner 决定执行哪些）。"""
-    data = load_yaml_config("sources.yaml")
+def _read_sources_yaml() -> dict:
+    """读取 sources.yaml（每次调用都重新读取 —— Collector 配置需要频繁调整，
+    不走 load_yaml_config 的长期 LRU cache，P1-6）。"""
+    path = CONFIG_DIR / "sources.yaml"
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data or {}
+
+
+def load_sources() -> tuple[list[SourceConfig], list[dict]]:
+    """逐条解析（P0-1）：单个配置错误不阻塞其他 source。
+
+    返回 (valid_sources, config_errors)。config_errors 元素：
+    {source_id, name, error}；id 缺失时 source_id 用占位。"""
+    data = _read_sources_yaml()
     raw_list = data.get("collectors") or []
+    valid: list[SourceConfig] = []
+    errors: list[dict] = []
+    seen_ids: set[str] = set()
     if not isinstance(raw_list, list):
-        raise SourceConfigError("sources.yaml 的 collectors 必须是列表")
-    return [parse_source(item) for item in raw_list]
+        return [], [{"source_id": "?", "name": "sources.yaml", "error": "collectors 必须是列表"}]
+    for index, item in enumerate(raw_list):
+        if not isinstance(item, dict):
+            errors.append({"source_id": f"item#{index}", "name": f"item#{index}",
+                           "error": "source 必须是对象"})
+            continue
+        source_id = str(item.get("id", "")).strip()
+        name = str(item.get("name", "")).strip() or source_id or f"item#{index}"
+        # id 全局唯一（P0-1）
+        if source_id in seen_ids:
+            errors.append({"source_id": source_id, "name": name,
+                           "error": f"source id 重复: {source_id!r}（id 必须全局唯一）"})
+            continue
+        try:
+            parsed = parse_source(item)
+        except SourceConfigError as e:
+            errors.append({"source_id": source_id or f"item#{index}", "name": name,
+                           "error": str(e)})
+            continue
+        seen_ids.add(source_id)
+        valid.append(parsed)
+    return valid, errors
 
 
-def load_enabled_sources() -> list[SourceConfig]:
-    return [s for s in load_sources() if s.enabled]
+def load_enabled_sources() -> tuple[list[SourceConfig], list[dict]]:
+    valid, errors = load_sources()
+    return [s for s in valid if s.enabled], errors
+
+
+def ensure_sources_schema() -> dict:
+    """legacy V0.1.1 sources.yaml → V0.2 迁移（P1-7）：
+    无 schema_version 且 collectors 为空的旧文件 → 备份 + 复制 bundled 默认配置；
+    已有版本号或用户主动清空（有版本号）则尊重，不覆盖。"""
+    path = CONFIG_DIR / "sources.yaml"
+    data = _read_sources_yaml()
+    version = data.get("schema_version")
+    collectors = data.get("collectors")
+    if version is not None:
+        return {"migrated": False, "reason": "已有版本"}
+    # 无版本：legacy 文件。若为空列表 → 迁移到 bundled 默认（若存在且不是同一文件）
+    if isinstance(collectors, list) and len(collectors) == 0:
+        from app.core.config import RESOURCE_ROOT
+
+        bundled_path = RESOURCE_ROOT / "config" / "sources.yaml"
+        if bundled_path.exists() and bundled_path.resolve() != path.resolve():
+            import shutil
+
+            shutil.copy2(path, CONFIG_DIR / "sources.yaml.legacy.bak")
+            with bundled_path.open("r", encoding="utf-8") as f:
+                bundled_data = yaml.safe_load(f) or {}
+            bundled_data.setdefault("schema_version", 2)
+            path.write_text(
+                yaml.safe_dump(bundled_data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            return {"migrated": True, "reason": "legacy 空配置已迁移到 V0.2 默认 sources"}
+    return {"migrated": False, "reason": "无需迁移"}
 
 
 def keyword_filter_passes(

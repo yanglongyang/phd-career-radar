@@ -57,7 +57,7 @@ phd-career-radar/
 - 关键词过滤（sources.yaml filters）为确定性 pre-filter，命中计数保留在运行摘要；
 - Inbox → “AI 解析” → 现有 Preview → 确认 → 正式 Job（Collector 从不直接创建正式 Job）；
 - 每个 source 独立事务：一个失败不影响其他 source 已落库数据；
-- SSRF 边界复用 Phase 3 组件（仅公网 IP、逐跳校验、大小限制）。
+- SSRF 边界沿用 Phase 3 的同一套安全策略（仅公网 IP、逐跳重定向校验、大小限制、Content-Type 验证）；collectors/http.py 为独立实现，策略与 Phase 3 web.py 一致。
 
 ## 运行方式（两种模式）
 

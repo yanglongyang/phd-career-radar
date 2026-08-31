@@ -97,8 +97,9 @@ export default function DiscoverPage() {
   const extractMutation = useMutation({
     mutationFn: extractDiscoveredJob,
     onSuccess: (preview, id) => {
-      // 进入现有 Preview：跳转岗位导入页并携带解析结果（存到 sessionStorage 由导入页读取）
+      // 进入现有 Preview：携带解析结果与 source id（保存后回写 imported）
       sessionStorage.setItem("pcr-inbox-preview", JSON.stringify({ preview, sourceId: id }));
+      sessionStorage.setItem("pcr-inbox-source-id", String(id));
       window.location.href = "/jobs/import?from=inbox";
     },
     onError: (err) => setErrorMsg(err.message),

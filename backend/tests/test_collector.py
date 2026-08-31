@@ -149,7 +149,7 @@ def test_json_api_collector_relative_url_resolved(monkeypatch):
         }),
     )
     jobs = collector.collect()
-    assert jobs[0].source_url == "/jobs/9"  # JSON API 相对 URL 由调用方 resolve；此处原样保留
+    assert jobs[0].source_url == "https://api.example.com/jobs/9"  # 已 resolve（P1-3）
 
 
 def test_json_api_timeout_error(monkeypatch):
@@ -437,7 +437,7 @@ def test_collector_api_run_end_to_end(client, monkeypatch):
     from app.api.routes import collectors as collectors_routes
 
     srcs = [_src("A"), _src("B", org="测试大学2"), _src("bad", org="测试大学3")]
-    monkeypatch.setattr(collectors_routes, "load_enabled_sources", lambda: srcs)
+    monkeypatch.setattr(collectors_routes, "load_enabled_sources", lambda: (srcs, []))
 
     resp = client.post("/api/collectors/run")
     assert resp.status_code == 200, resp.text
@@ -553,9 +553,221 @@ def test_collector_sources_endpoint(client, monkeypatch):
 
     monkeypatch.setattr(
         collectors_routes, "load_sources",
-        lambda: [_src("A"), SourceConfig(id="B", name="B", type="json_api", enabled=False,
-                                         url="https://x.com/b")],
+        lambda: ([
+            _src("A"),
+            SourceConfig(id="B", name="B", type="json_api", enabled=False, url="https://x.com/b"),
+        ], []),
     )
     data = client.get("/api/collectors/sources").json()
-    assert data[0]["enabled"] is True
-    assert data[1]["enabled"] is False
+    assert data["sources"][0]["enabled"] is True
+    assert data["sources"][1]["enabled"] is False
+# ---------- V0.2.1 Final Collector Integrity ----------
+
+def test_load_sources_isolates_config_errors(monkeypatch, tmp_path):
+    """P0-1：单个 source 配置错误不阻塞其他 source；duplicate id 报错。"""
+    import yaml as _yaml
+
+    from app.collectors import config as collector_config
+
+    monkeypatch.setattr(collector_config, "CONFIG_DIR", tmp_path)
+    (tmp_path / "sources.yaml").write_text(_yaml.safe_dump({
+        "schema_version": 2,
+        "collectors": [
+            {"id": "A", "name": "A", "type": "json_api", "enabled": True, "url": "https://a.com"},
+            {"id": "B", "name": "B", "type": "html_list", "enabled": True, "url": "https://b.com",
+             "selectors": {"item": "li"}},
+            {"id": "A", "name": "重复A", "type": "json_api", "enabled": True, "url": "https://a2.com"},
+            {"id": "C", "name": "C", "type": "json_api", "enabled": "true", "url": "https://c.com"},
+        ],
+    }, allow_unicode=True), encoding="utf-8")
+
+    valid, errors = collector_config.load_sources()
+    assert [s.id for s in valid] == ["A", "B"]
+    assert len(errors) == 2
+    assert any("重复" in e["error"] for e in errors)
+    assert any("enabled" in e["error"] for e in errors)
+
+
+def test_runner_isolates_config_errors_in_run(client, db_session, monkeypatch):
+    """P0-1 端到端：valid A / invalid B / valid C → A/C 成功落库、B failed item。"""
+    from app.collectors.base import RawJob
+    from app.collectors.config import SourceConfig
+    from app.models import DiscoveredJob
+    from app.services import collector_runner
+
+    def fake_build(source):
+        class Fake(collector_runner.collectors_registry.JobCollector):
+            def __init__(self, source):
+                self.source = source
+
+            def collect(self):
+                return [RawJob(source_id=source.id, source_name=source.name,
+                               title=f"{source.id}岗位", source_job_id=f"{source.id}-1",
+                               source_url=f"https://x.com/{source.id}/jobs/1",
+                               organization_hint="大学")]
+
+        return Fake(source)
+
+    monkeypatch.setattr(collector_runner.collectors_registry, "build_collector", fake_build)
+    sources = [
+        SourceConfig(id="A", name="A", type="json_api", enabled=True, url="https://a.com",
+                     organization="大学", mapping={"items": "items"}),
+        SourceConfig(id="C", name="C", type="json_api", enabled=True, url="https://c.com",
+                     organization="大学", mapping={"items": "items"}),
+    ]
+    config_errors = [{"source_id": "B", "name": "B", "error": "未知 collector type: x"}]
+
+    run = collector_runner.run_collectors(db_session, sources, config_errors=config_errors)
+    db_session.commit()
+    db_session.expire_all()
+
+    statuses = {i.source_id: i.status for i in run.items}
+    assert statuses == {"A": "success", "B": "failed", "C": "success"}
+    assert run.failed_source_count == 1
+    assert run.source_count == 3
+    assert run.completed_source_count == 3  # P1-4：结束即完成（success+failed）
+    assert db_session.query(DiscoveredJob).filter_by(source_id="A").count() == 1
+    assert db_session.query(DiscoveredJob).filter_by(source_id="C").count() == 1
+    assert run.status == "partial_failure"
+
+
+def test_possible_duplicate_requires_known_org(client, db_session, monkeypatch):
+    """P1-5：单位未知（org 皆空）不执行基于组织的 possible 判定。"""
+    from app.collectors.base import RawJob
+    from app.collectors.config import SourceConfig
+    from app.models import DiscoveredJob
+    from app.services import collector_runner
+
+    def fake_build(source):
+        class Fake(collector_runner.collectors_registry.JobCollector):
+            def __init__(self, source):
+                self.source = source
+
+            def collect(self):
+                return [
+                    RawJob(source_id="A", source_name="A", title="青年研究员招聘",
+                           source_job_id="x1", source_url="https://a.com/1"),
+                    RawJob(source_id="A", source_name="A", title="青年研究员公告",
+                           source_job_id="x2", source_url="https://a.com/2"),
+                ]
+
+        return Fake(source)
+
+    monkeypatch.setattr(collector_runner.collectors_registry, "build_collector", fake_build)
+    src = SourceConfig(id="A", name="A", type="json_api", enabled=True, url="https://a.com",
+                       organization=None, mapping={"items": "items"})  # aggregator：org 为空
+    run = collector_runner.run_collectors(db_session, [src])
+    db_session.commit()
+
+    rows = db_session.query(DiscoveredJob).all()
+    assert len(rows) == 2
+    assert all(r.status == "new" for r in rows)  # 不因 org=NULL 互相误标
+    assert run.possible_duplicate_count == 0
+
+
+def test_extract_bridge_preserves_provenance(client, monkeypatch, db_session):
+    """P0-2A：extract bridge 保留 source_type=url / source_url=原始招聘 URL。"""
+    from app.ai.provider import LLMProvider
+    from app.ai.schemas import JobExtractionOut
+    from app.api.deps import get_ai_provider
+    from app.models import DiscoveredJob
+
+    db_session.add(
+        DiscoveredJob(source_id="A", source_name="A", title_raw="青年研究员",
+                      source_url="https://hr.example.edu.cn/jobs/123",
+                      organization_hint="大学1",
+                      description_raw="某某大学面向海内外公开招聘青年研究员。申请人应具有有机化学博士学位，研究方向为荧光探针。提供启动经费。")
+    )
+    db_session.commit()
+
+    class Fake(LLMProvider):
+        name = "fake"
+        model = "m"
+
+        def extract_job(self, jd_text):
+            return JobExtractionOut.model_validate({"title": "青年研究员"}), "job_extraction_v1"
+
+        def evaluate_job(self, context):
+            raise NotImplementedError
+
+        def summarize_reputation(self, context):
+            raise NotImplementedError
+
+    client.app.dependency_overrides[get_ai_provider] = lambda: Fake()
+    try:
+        resp = client.post("/api/discovered-jobs/1/extract")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source_type"] == "url"
+        assert data["source_url"] == "https://hr.example.edu.cn/jobs/123"  # 原始 URL 保留
+        assert data["prompt_version"] == "job_extraction_v1"
+    finally:
+        client.app.dependency_overrides.pop(get_ai_provider, None)
+
+
+def test_link_imported_job_end_to_end(client, db_session):
+    """P0-2B：Save 正式 Job 后 link-imported-job 幂等回写 imported + imported_job_id。"""
+    from app.models import DiscoveredJob, Job
+
+    db_session.add(
+        DiscoveredJob(source_id="A", source_name="A", title_raw="青年研究员",
+                      source_url="https://x.com/1", organization_hint="大学1",
+                      description_raw="招聘公告正文足够长的内容，用于测试。")
+    )
+    db_session.commit()
+    job = Job(title="青年研究员", fingerprint="f", description_raw="x")
+    db_session.add(job)
+    db_session.commit()
+
+    resp = client.post("/api/discovered-jobs/1/link-imported-job", json={"job_id": job.id})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "imported"
+    assert resp.json()["imported_job_id"] == job.id
+
+    # 幂等：再次调用结果一致
+    resp2 = client.post("/api/discovered-jobs/1/link-imported-job", json={"job_id": job.id})
+    assert resp2.status_code == 200
+    assert resp2.json()["imported_job_id"] == job.id
+
+    # 普通 PATCH 不能伪造 imported
+    assert client.patch("/api/discovered-jobs/1", json={"status": "imported"}).status_code == 422
+    # 不存在的正式岗位 → 404
+    assert client.post("/api/discovered-jobs/1/link-imported-job", json={"job_id": 99999}).status_code == 404
+
+
+def test_ensure_sources_schema_migrates_legacy(monkeypatch, tmp_path):
+    """P1-7：legacy 空 sources.yaml → 迁移到 bundled 默认（备份 + schema_version 2）。"""
+    import yaml as _yaml
+
+    from app.collectors import config as collector_config
+    from app.core import config as core_config
+
+    user_dir = tmp_path / "user"
+    bundle_dir = tmp_path / "bundle"
+    (user_dir / "config").mkdir(parents=True)
+    (bundle_dir / "config").mkdir(parents=True)
+    (user_dir / "config" / "sources.yaml").write_text("collectors: []\n", encoding="utf-8")
+    (bundle_dir / "config" / "sources.yaml").write_text(
+        _yaml.safe_dump({"schema_version": 2, "collectors": [
+            {"id": "nju", "name": "NJU", "type": "html_list", "enabled": True,
+             "url": "https://x.com"}]}, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(collector_config, "CONFIG_DIR", user_dir / "config")
+    monkeypatch.setattr(core_config, "RESOURCE_ROOT", bundle_dir)
+
+    result = collector_config.ensure_sources_schema()
+    assert result["migrated"] is True
+    migrated = _yaml.safe_load((user_dir / "config" / "sources.yaml").read_text(encoding="utf-8"))
+    assert migrated["schema_version"] == 2
+    assert migrated["collectors"][0]["id"] == "nju"
+    assert (user_dir / "config" / "sources.yaml.legacy.bak").exists()
+
+    # 已有版本（用户主动清空）尊重，不覆盖
+    (user_dir / "config" / "sources.yaml").write_text(
+        _yaml.safe_dump({"schema_version": 2, "collectors": []}), encoding="utf-8"
+    )
+    result2 = collector_config.ensure_sources_schema()
+    assert result2["migrated"] is False
+    assert _yaml.safe_load((user_dir / "config" / "sources.yaml").read_text(encoding="utf-8"))["collectors"] == []

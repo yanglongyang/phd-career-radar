@@ -185,3 +185,10 @@ export async function extractDiscoveredJob(id: number) {
     method: "POST",
   });
 }
+
+export async function linkDiscoveredJob(discoveredId: number, jobId: number) {
+  return api<import("../types").DiscoveredJob>(`/discovered-jobs/${discoveredId}/link-imported-job`, {
+    method: "POST",
+    body: JSON.stringify({ job_id: jobId }),
+  });
+}

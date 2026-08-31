@@ -962,3 +962,55 @@ RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
   possible/filter 5、API 端到端 3、extract bridge 2 等）；vitest：17 passed；ruff：All checks passed；
   前端 build：通过；真实抓取三次冒烟：通过。
 - migration 链：e2bcd6b51463 → 4a48e7786118 → d281b97059b5 → 937a152aeca9 → 37f788d24311。
+
+---
+
+## V0.2.1 — Final Collector Integrity（2026-08-31 完成）
+
+封死两个真正的端到端缺口（配置隔离、Inbox→正式 Job 闭环）+ 六个 P1 + 两个 cleanup。
+
+### P0
+
+1. **单 source 配置错误隔离 + duplicate id**：`load_sources()` 改为逐条解析返回
+   (valid, errors)；runner 为配置错误项创建 failed CollectorRunItem（含错误信息），
+   其余 source 照常运行；id 全局唯一校验。回归：valid A / invalid B / valid C →
+   查 DB 确认 A/C 落库、B failed、run persisted。
+2. **Inbox → 正式 Job 闭环**：
+   - extract bridge 显式保留 `source_type=url / source_url=原始招聘 URL`（不再经
+     ExtractionRequest 降级成普通粘贴文本）——正式 Job 保存时 provenance 不丢；
+   - 新增专用 `POST /discovered-jobs/{id}/link-imported-job`（校验 Job 真实存在、
+     幂等）回写 `status=imported + imported_job_id`；**普通 PATCH 禁止伪造 imported**；
+   - 前端：AI 解析时记录 source id，Save 正式 Job 成功后自动调用 link-imported-job
+     并失效 Inbox 查询。
+
+### P1
+
+3. **JSON 相对 URL resolve**：基于 fetch 返回的 final_url 做 urljoin；只接受
+   http/https（拒绝 javascript:/mailto: 进入可点击链接）。测试：/jobs/9 → 完整 URL。
+4. **completed_source_count 修正**：= success + failed + skipped（运行结束即显示完成），
+   与 failed_source_count 分开判断 run status。
+5. **possible duplicate 真正按单位**：new_org = raw.organization_hint or
+   source.organization；两者皆空（aggregator）跳过 Level 4，不互相误标。
+6. **sources.yaml 每次 run 非缓存读取**：collectors/config 直接读文件，不走
+   load_yaml_config 的长期 LRU cache（collector 配置经常需要调整）。
+7. **legacy sources.yaml 迁移**：sources.yaml 增加 `schema_version: 2`；无版本的
+   空 collectors 旧文件（V0.1.1 用户）→ 备份 .legacy.bak + 复制 bundled 默认；
+   已有版本（含用户主动清空）尊重，不覆盖。
+8. **Collector 前端 vitest 回归**（+8）：source 失败可见/错误不静默、成功计数、
+   possible duplicate Badge 色调、run summary 状态映射、running 语义、
+   extract/link-imported 调用契约（fetch stub）、API 错误携带 detail。
+
+### cleanup
+
+9. README SSRF 表述修正：改为"沿用同一套安全策略（独立实现）"，不再声称复用组件。
+10. HtmlListCollector 去重复 GET：一次 fetch 的 body 直接解析，不再二次请求列表页。
+
+### 端到端闭环冒烟（真实 DB）
+
+抓取 → Inbox（new + 原始 URL）→ AI 解析（source_type=url）→ Save 正式 Job
+（source_url = 原招聘 URL 保留）→ link-imported（imported + imported_job_id）→ ✅。
+
+### 测试 / lint / build
+
+- pytest：**211 passed**（+6 V0.2.1 测试）；vitest：**25 passed**（+8）；
+  ruff：All checks passed；前端 build：通过；闭环冒烟：通过。
