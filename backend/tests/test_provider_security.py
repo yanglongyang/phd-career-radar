@@ -35,7 +35,7 @@ def test_http_error_scrubs_remote_body():
         _FakeResp(
             401,
             '{"error": {"type": "invalid_request_error",'
-            ' "message": "Incorrect API key: sk-super-secret-abcdef123456"}}',
+            ' "message": "Incorrect API key: sk-fake-key-abc"}}',
         )
     )
     assert "HTTP 401" in msg

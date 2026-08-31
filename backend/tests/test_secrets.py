@@ -105,6 +105,17 @@ def test_validate_llm_base_url_cases():
     assert validate_llm_base_url("") is not None
 
 
+def test_validate_llm_base_url_rejects_bad_port_and_query():
+    """V0.2.5 P3：非法端口（:abc）与 query string 必须拒绝 ——
+    否则保存能通过但 normalize 时抛 ValueError / query 被静默丢弃。"""
+    assert validate_llm_base_url("https://api.example.com:abc/v1") is not None
+    assert "端口" in validate_llm_base_url("https://api.example.com:abc/v1")
+    assert validate_llm_base_url("https://api.example.com/v1?foo=bar") is not None
+    assert "查询" in validate_llm_base_url("https://api.example.com/v1?foo=bar")
+    # 规范化函数对合法输入不再抛异常
+    normalize_base_url("https://api.example.com:8443/v1")
+
+
 def test_normalize_base_url_ignores_trailing_slash_and_case():
     assert normalize_base_url("HTTPS://API.Example.com/v1/") == "https://api.example.com/v1"
     assert normalize_base_url("https://api.example.com/v1") == "https://api.example.com/v1"
