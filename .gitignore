@@ -14,6 +14,7 @@ frontend/dist/
 # 环境与数据
 .env
 data/*.db
+data/*.pid
 data/*.db-journal
 data/*.sqlite3
 
