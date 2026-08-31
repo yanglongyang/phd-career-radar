@@ -1237,3 +1237,17 @@ query string 直接拒绝（normalize 丢弃 query 且 Provider 拼接 /chat/com
 - 合并说明：main 保护开启后 PR 的 push/pull_request 事件一度未触发
   （GitHub 事件投递异常，workflow_dispatch 正常），CI 已支持手动触发
   （`gh workflow run ci.yml --ref <branch>`），并以此完成了本轮合并。
+
+## V0.2.5 closure — 迁移测试接入 required CI（2026-08-31）
+
+验收发现：`test_migrate_closure.py` 复用了 `test_launcher_gui.py` 的 `win32_only`
+marker，而该 marker 带 `CI == "true"` 跳过（GUI 需要桌面）——导致 3 个关键的
+A→B 迁移回归测试在 required CI 里被静默跳过（CI 日志 246 passed, 7 skipped）。
+
+修复：迁移测试改用独立的 `windows_dpapi_only` marker（仅非 Windows 跳过，
+不依赖 CI 环境变量）；`_load_launcher()` 只是加载模块、不创建 Tk 窗口，可继续复用。
+顺带修正 secret_scan.py 顶部过时的正则注释。
+
+验证：CI（windows runner）实测 **249 passed, 4 skipped** —— 跳过的只剩 4 个
+真正需要桌面的 GUI 测试；本地全量 253 passed。PR #3 自动触发 CI（此前一次
+PR 事件未触发属 GitHub 瞬时投递异常，非持续问题），合并后 main = b5918d7。
