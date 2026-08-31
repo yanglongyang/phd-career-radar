@@ -383,3 +383,15 @@ export interface ReputationReport {
   prompt_version: string | null;
   generated_at: string;
 }
+
+export interface SettingsData {
+  "scoring.yaml": { scoring: Record<string, number>; recommendation?: unknown; region_tier_scores?: Record<string, number> };
+  "regions.yaml": { preferred: string[]; acceptable: string[]; neutral: string[]; avoid: string[]; city_details?: Record<string, unknown> };
+  "profile.yaml": { hard_filters: Record<string, unknown>; research_interests?: string[]; skills?: string[] };
+}
+
+export interface ReEvaluateResult {
+  total: number;
+  succeeded: number[];
+  failed: { job_id: number; error: string }[];
+}

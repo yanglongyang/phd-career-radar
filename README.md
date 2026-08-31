@@ -127,6 +127,7 @@ python -m alembic downgrade -1     # 回退一步
 
 | Phase | 内容 | 状态 |
 | --- | --- | --- |
+| 全部阶段 | **V0.1 完成**：领域模型 / AI 提取 / AI 评估 / 申请 CRM / 风评系统 / 收尾 | ✅ FROZEN |
 | 1 | 基础设施：仓库、后端、前端、数据库、迁移、基础 UI | ✅ 完成 |
 | 2 | Job/Organization CRUD、岗位列表/详情、手工导入、去重、版本监控、Dashboard API | ✅ 完成 |
 | 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |
@@ -135,7 +136,7 @@ python -m alembic downgrade -1     # 回退一步
 | 4 | AI 评估：后端自动构造输入快照（Profile+岗位含 JD 正文+地区+分层 Evidence+Hard Filters）→ 同一份内容发给模型并存档 → AI 输出七个维度分（region 由地区引擎独占）/结构化风险/信息缺口/置信度 → 规则引擎计算总分/覆盖度/推荐等级 → 可审计入库；地区分只由用户配置决定、无证据强制风评=null、Evidence 按 job/单位/院系/实验室分层过滤（Phase 4.1/4.1.1 完整性加固：finalize 以 input_snapshot 为唯一事实源——region/reputation/Profile/Hard Filters 均由快照强制，任何调用方无法制造矛盾评估；snapshot 与审计关联强一致、首聘周期入 context、department scope 双非空匹配） | ✅ 完成（需配置 AI；AI 未配置时明确 503，评估数据不一致时 409 拒绝保存） |
 | 5 | Career CRM：详情页一键加入 CRM、申请状态流转 API（14 态流转表约束、非法流转 409、applied_at 仅在真正投递时记录、status 显式 null/非法查询参数 422）、看板拖拽改状态 + 列表视图（加载失败透明显示）、next action 本地日期逾期提醒、Dashboard 流程计数联动 | ✅ 完成（时间戳契约：无时区标记的 datetime 一律按 UTC 解析，前端转本地日历日展示） |
 | 6 | Evidence CRUD UI 与风评聚合、可信度呈现 | ⬜ 未实现（数据模型已建） |
-| 7 | 设置页、筛选增强、测试补全、文档完善、Collector 架构 | ⬜ 未实现 |
+| 7 | Polish：设置页可视化（评分权重/地区偏好/Hard Filters 写回 config/*.yaml、备份 .bak）、批量重评（改权重后一键重评全部岗位）、Collector 架构定义（JobCollector 接口 + registry，不实现真实爬虫）、prompt v2 标题修正 | ✅ 完成 |
 
 Phase 2.1 关键设计约定（详见 docs/DEVLOG.md）：
 

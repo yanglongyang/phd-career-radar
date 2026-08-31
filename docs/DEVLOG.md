@@ -693,3 +693,44 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 
 - **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
   申请历史时间线、applied_at 显式编辑。
+
+---
+
+## Phase 7 — Polish（2026-08-31 完成）—— V0.1 收尾
+
+### 已实现
+
+1. **prompt 文案修正**：`job_evaluation_v2.md` 标题 v1 → v2（registry 早前已切 v2）。
+2. **设置 API**（`GET/PUT /api/settings`）：读取/写回 config/{scoring,regions,profile}.yaml——
+   写回前自动备份 `.bak`；校验：评分权重合计必须 100、未知维度拒绝、地区层级必须是列表、
+   minimum_salary 必须是数字或 null、extra=forbid。配置仍是事实源，改文件即生效。
+3. **批量重评**（`POST /api/jobs/re-evaluate-all`）：遍历全部岗位逐个走完整 evaluate_job
+   编排（同一 input_snapshot 审计语义），单点失败不中断（Collector 同款容错），返回
+   total/succeeded/failed 汇总；AI 未配置 503。
+4. **Collector 架构定义**（`app/collectors/`）：`JobCollector` ABC + `RawJob` dataclass +
+   `CollectorRegistry`（按 sources.yaml enabled 清单执行、单点失败隔离）。**不实现任何真实
+   爬虫** —— 只定义契约，符合"不要为了 V0.1 编写复杂反爬机制"。
+5. **前端设置页**：评分权重（8 维，实时合计徽标）、地区偏好四层（顿号/逗号分隔）、
+   Hard Filters（最低薪资 + 三个排除开关）、保存配置、批量重评按钮（结果汇总展示）。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**168 passed**（settings GET/PUT、权重合计校验、roundtrip 写回并恢复、
+  未知文件/非法值拒绝、批量重评 503/容错汇总）；vitest：17 passed；
+  ruff：All checks passed；前端 build：通过；浏览器验证设置页渲染。
+
+### 明确未实现（V0.1 范围外，按规格不阻塞）
+
+- 真实 Collector 爬虫（反爬对抗明确不做）；Evidence selection/ranking（大量证据挑选策略）；
+- 申请状态历史时间线；applied_at 显式编辑；多用户/权限系统；Redis/Kafka/微服务；
+- GitHub Actions CI（仓库无独立 status checks，测试数字为本地执行记录）。
+
+## V0.1 完成状态
+
+Phase 2 Domain Model / Phase 3 AI Extraction / Phase 4 AI Evaluation / Phase 5 Career CRM /
+Phase 6 Evidence & Reputation / Phase 7 Polish —— 全部完成。pytest 168 passed、vitest 17 passed、
+ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e7786118 → d281b97059b5）可用。

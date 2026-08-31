@@ -137,3 +137,22 @@ export async function synthesizeReputation(orgId: number, department?: string | 
     { method: "POST" },
   );
 }
+
+export async function getSettings() {
+  return api<import("../types").SettingsData>("/settings");
+}
+
+export async function updateSettings(payload: {
+  scoring_yaml?: unknown;
+  regions_yaml?: unknown;
+  profile_yaml?: unknown;
+}) {
+  return api<{ written: Record<string, string> }>("/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reEvaluateAll() {
+  return api<import("../types").ReEvaluateResult>("/jobs/re-evaluate-all", { method: "POST" });
+}

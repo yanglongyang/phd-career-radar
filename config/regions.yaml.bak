@@ -1,0 +1,18 @@
+# 地区偏好示例 — 以下城市仅是示例，请按个人情况修改，系统不预置任何默认偏好。
+# 匹配顺序：先精确匹配城市名，再匹配省份名。
+# 未出现在任何层级中的地区 = unrated（用户没有评价过）→ 评分为 null，不自动给 50 分；
+# 只有显式放入 neutral 的地区才视为"用户中立"（基准分 50，见 scoring.yaml）。
+
+preferred: []    # 例：[南京, 上海, 苏州]
+acceptable: []   # 例：[杭州, 合肥]
+neutral: []
+avoid: []
+
+# 可选：对特定城市补充子维度评分（0-100），用于精细化地区评分
+# 子维度：city_preference / cost_of_living / research_ecosystem / career_mobility / life_quality
+city_details: {}
+#  例：
+#  南京:
+#    cost_of_living: 60
+#    research_ecosystem: 85
+#    career_mobility: 80

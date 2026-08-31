@@ -22,6 +22,7 @@ from app.schemas.job import (
     JobVersionOut,
 )
 from app.schemas.organization import OrganizationBrief
+from app.services import batch_evaluation
 from app.services import evaluation as evaluation_service
 from app.services import jobs as job_service
 from app.services.web import PageFetchError, fetch_url_text
@@ -252,6 +253,24 @@ def list_evaluations(job_id: int, db: Session = Depends(get_db)):
         select(JobEvaluation).where(JobEvaluation.job_id == job.id)
     ).all()
     return [JobEvaluationOut.from_model(e) for e in sorted(rows, key=lambda x: x.id, reverse=True)]
+
+
+@router.post("/re-evaluate-all")
+def re_evaluate_all(
+    db: Session = Depends(get_db), provider=Depends(get_ai_provider)
+):
+    """批量重评：修改评分权重/地区偏好后，一键重新评估全部岗位。
+
+    逐个岗位走完整编排（同一 input_snapshot 审计语义）；单个失败不中断，
+    返回汇总（succeeded/failed）。AI 未配置 → 503。"""
+    if provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI 未配置：请在 .env 中设置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 后重试",
+        )
+    result = batch_evaluation.re_evaluate_all(db, provider)
+    db.commit()
+    return result
 
 
 @router.post("/extract-preview", response_model=ExtractionPreviewOut)
