@@ -23,9 +23,13 @@ def re_evaluate_all(db: Session, provider: LLMProvider) -> dict:
         job = db.get(Job, job_id)
         try:
             evaluate_job(db, job, provider)
+            # 每岗位独立事务提交：某个岗位失败 rollback 不会撤销
+            # 之前成功岗位已落库的 Evaluation（Phase 7.1 P0-2）
+            db.commit()
             succeeded.append(job_id)
         except (AIError, ValueError) as e:
             db.rollback()
             failed.append({"job_id": job_id, "error": str(e)[:300]})
-        db.expunge_all()
+        finally:
+            db.expunge_all()
     return {"total": len(job_ids), "succeeded": succeeded, "failed": failed}

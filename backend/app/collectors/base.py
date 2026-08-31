@@ -36,13 +36,29 @@ class JobCollector(ABC):
 
 
 class CollectorRegistry:
-    """按 sources.yaml 的 enabled 清单执行；单点失败不中断整体。"""
+    """按 sources.yaml 的 enabled 清单执行；单点失败不中断整体。
+
+    - run_enabled(names)：接受显式名称列表；
+    - run_configured()：读取 config/sources.yaml 的 collectors[].enabled 清单。
+    """
 
     def __init__(self) -> None:
         self._collectors: dict[str, JobCollector] = {}
 
     def register(self, collector: JobCollector) -> None:
         self._collectors[collector.name] = collector
+
+    def run_configured(self) -> dict:
+        """读取 sources.yaml 的 enabled 清单并执行（Phase 7.1 接线）。"""
+        from app.core.config import load_yaml_config
+
+        sources = load_yaml_config("sources.yaml")
+        enabled = [
+            c["name"]
+            for c in (sources.get("collectors") or [])
+            if isinstance(c, dict) and c.get("enabled")
+        ]
+        return self.run_enabled(enabled)
 
     def run_enabled(self, enabled_names: list[str]) -> dict:
         results: dict[str, list[RawJob]] = {}

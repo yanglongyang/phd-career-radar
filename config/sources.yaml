@@ -1,5 +1,6 @@
-# 招聘信息来源配置（Phase 7+ Collector 架构占位）
-# V0.1 使用手工新建 / 粘贴文本 / URL 三种导入方式，此文件暂不生效。
+# 招聘信息来源配置（Collector 架构，Phase 7 已定义接口）
+# CollectorRegistry.run_configured() 读取本文件的 enabled 清单；
+# 真实爬虫仍未实现（反爬对抗明确不做），当前导入方式为手工 / 粘贴文本 / URL。
 
 collectors: []
 # 未来示例：

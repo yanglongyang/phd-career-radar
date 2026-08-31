@@ -734,3 +734,56 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 Phase 2 Domain Model / Phase 3 AI Extraction / Phase 4 AI Evaluation / Phase 5 Career CRM /
 Phase 6 Evidence & Reputation / Phase 7 Polish —— 全部完成。pytest 168 passed、vitest 17 passed、
 ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e7786118 → d281b97059b5）可用。
+
+---
+
+## Phase 7.1 — Final V0.1 Integrity（2026-08-31 完成）
+
+第十二轮审查：两个 P0（config cache、批量重评事务）+ 六个 P1 收口。无 migration。
+
+### P0
+
+1. **Settings 保存后清配置缓存**：`update_settings()` 全部 YAML 成功写入后调用
+   `load_yaml_config.cache_clear()` —— "保存即生效"真正成立（此前页面显示新值、
+   评估/地区/Hard Filters 仍用旧 cache）。测试：预热旧 cache → PUT 新 regions →
+   `get_region_tier/get_region_score` 立即返回新值（preferred/90）。
+2. **批量重评每岗位独立事务**：`re_evaluate_all()` 每个岗位单独 `commit()`——
+   中途某岗位失败 `rollback()` 不再撤销之前成功岗位已落库的 Evaluation。
+   测试：success → fail → success 三岗位，**查 JobEvaluation 表**确认第 1、3 个
+   真实落库、第 2 个无记录（原测试只断言 response，未覆盖"成功之后再失败"）。
+
+### P1
+
+3. **前端地区保存保留 city_details**：`regions_yaml` 改为 spread 原文件后合并。
+4. **设置表单竞态**：保存成功后不再 `setLoaded(false)`（本地表单即刚保存值，
+   只 invalidate backing query），避免旧 query data 重新初始化表单的回跳竞态。
+5. **顿号支持**：地区分隔正则 `/[，,]/` → `/[，,、]/`。
+6. **Settings 校验强化**：评分权重 8 维必须齐全、全部 numeric 且非负、合计 100
+   （此前 `{fit: 100}` 可通过，八维模型会被缩水）；Hard Filters 三个排除开关
+   必须是真正 boolean（字符串 `"false"` 是 Python 真值陷阱，已拒绝）、
+   unacceptable_regions 必须是字符串列表、minimum_salary 数字或 null 且非负。
+7. **.bak 清理**：删除已跟踪的 `config/regions.yaml.bak`；`.gitignore` 加
+   `config/*.bak`；设置写盘测试改用 `tmp_path` + 双 patch（config.py 与
+   settings.py 的 CONFIG_DIR）+ 前后清 cache —— **pytest 不再触碰/污染真实
+   config/ 目录与 Git working tree**（有专门断言验证真实目录无 .bak）。
+8. **文档修正**：README Roadmap Phase 6 状态 ⬜→✅（与顶部"全部完成"矛盾）；
+   "配置 Profile/权重/地区"章节的批量重评说明更新（设置页一键重评已交付）；
+   `CollectorRegistry.run_configured()` 读取 sources.yaml 的 enabled 清单
+   （DEVLOG 声称与实现一致）；sources.yaml 注释更新（"暂不生效"→ 已接线，
+   真实爬虫仍未实现）。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**170 passed**（settings 套件重写为 tmp_path 化：cache 失效预热测试、
+  8 维/负数/非数字/boolean 陷阱/列表校验、事务落库断言、无 .bak 断言）
+- vitest：17 passed；ruff：All checks passed；前端 build：通过；
+  `git status` 在测试后 config/ 干净（无 .bak 残留）。
+
+### 明确未实现（V0.1 范围外）
+
+真实 Collector 爬虫、Evidence selection/ranking、申请历史时间线、applied_at
+显式编辑、多用户/权限、Redis/Kafka/微服务、GitHub Actions CI。

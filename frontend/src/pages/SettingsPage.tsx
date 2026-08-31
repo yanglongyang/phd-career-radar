@@ -72,13 +72,13 @@ export default function SettingsPage() {
       const regionsYaml: Record<string, string[]> = {};
       for (const tier of REGION_TIERS) {
         regionsYaml[tier] = (regions[tier] ?? "")
-          .split(/[，,]/)
+          .split(/[，,、]/)
           .map((s) => s.trim())
           .filter(Boolean);
       }
       return updateSettings({
         scoring_yaml: { ...settings!["scoring.yaml"], scoring },
-        regions_yaml: regionsYaml,
+        regions_yaml: { ...settings!["regions.yaml"], ...regionsYaml },  // 保留 city_details,
         profile_yaml: {
           ...settings!["profile.yaml"],
           hard_filters: {
@@ -92,9 +92,9 @@ export default function SettingsPage() {
       });
     },
     onSuccess: () => {
+      // 不重置 loaded：本地表单即刚保存的值，只失效 backing query 刷新后台数据
       setMessage("已保存并立即生效（原文件备份为 .bak；注释会被重写丢弃）");
       setError(null);
-      setLoaded(false);
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (err) => {

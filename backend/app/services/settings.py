@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from app.core.config import CONFIG_DIR
+from app.core.config import CONFIG_DIR, load_yaml_config
 
 _EDITABLE_FILES = ("scoring.yaml", "regions.yaml", "profile.yaml")
 
@@ -30,17 +30,30 @@ def read_settings() -> dict:
     }
 
 
+_SCORING_DIMENSIONS = {
+    "fit", "career_stability", "research_resources", "region",
+    "compensation", "reputation", "workload", "long_term",
+}
+
+
 def _validate_scoring(data: dict) -> None:
-    scoring = (data.get("scoring") or {})
+    """评分权重必须 8 维齐全、全部 numeric 且非负、合计 100。"""
+    scoring = data.get("scoring")
     if not isinstance(scoring, dict):
         raise ValueError("scoring 必须是对象")
-    unknown = set(scoring) - {
-        "fit", "career_stability", "research_resources", "region",
-        "compensation", "reputation", "workload", "long_term",
-    }
+    missing = _SCORING_DIMENSIONS - set(scoring)
+    if missing:
+        raise ValueError(f"缺少评分维度: {sorted(missing)}（8 维必须齐全）")
+    unknown = set(scoring) - _SCORING_DIMENSIONS
     if unknown:
         raise ValueError(f"未知评分维度: {sorted(unknown)}")
-    total = sum(float(v) for v in scoring.values() if isinstance(v, (int, float)))
+    total = 0.0
+    for dim, value in scoring.items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError(f"{dim} 必须是数字，收到 {value!r}")
+        if value < 0:
+            raise ValueError(f"{dim} 不能为负")
+        total += float(value)
     if abs(total - 100) > 0.01:
         raise ValueError(f"评分权重合计必须为 100，当前 {total}")
 
@@ -53,14 +66,24 @@ def _validate_regions(data: dict) -> None:
 
 
 def _validate_hard_filters(data: dict) -> None:
-    hf = data.get("hard_filters") or {}
+    """Hard Filters：unacceptable_regions 必须列表；minimum_salary 数字或 null；
+    三个排除开关必须是真正的 boolean（字符串 "false" 在 Python 里是真值，必须拒绝）。"""
+    hf = data.get("hard_filters")
     if not isinstance(hf, dict):
         raise ValueError("hard_filters 必须是对象")
+    regions = hf.get("unacceptable_regions", [])
+    if not isinstance(regions, list):
+        raise ValueError("unacceptable_regions 必须是列表")
+    if not all(isinstance(r, str) for r in regions):
+        raise ValueError("unacceptable_regions 的元素必须是字符串")
     if hf.get("minimum_salary") is not None:
-        try:
-            float(hf["minimum_salary"])
-        except (TypeError, ValueError) as e:
-            raise ValueError("minimum_salary 必须是数字或 null") from e
+        if not isinstance(hf["minimum_salary"], (int, float)) or isinstance(hf["minimum_salary"], bool):
+            raise ValueError("minimum_salary 必须是数字或 null")
+        if hf["minimum_salary"] < 0:
+            raise ValueError("minimum_salary 不能为负")
+    for key in ("reject_pi_funded", "reject_postdoc", "reject_high_risk_tenure_track"):
+        if key in hf and not isinstance(hf[key], bool):
+            raise ValueError(f"{key} 必须是 true/false，收到 {hf[key]!r}")
 
 
 def update_settings(payload: dict) -> dict:
@@ -101,4 +124,6 @@ def update_settings(payload: dict) -> dict:
             written[name] = _now()
         except OSError as e:
             raise ValueError(f"写入 {name} 失败：{e}") from e
+    # P0-1：配置缓存必须失效 —— 否则页面显示新值、运行时仍用旧配置
+    load_yaml_config.cache_clear()
     return written
