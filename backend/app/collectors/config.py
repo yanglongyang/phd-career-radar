@@ -18,6 +18,15 @@ KNOWN_TYPES = {"json_api", "html_list"}
 DEFAULT_INCLUDE_KEYWORDS: list[str] = []
 DEFAULT_EXCLUDE_KEYWORDS: list[str] = []
 
+# 招聘标题特征词：HtmlListCollector 列表页常混入导航/新闻动态，
+# 标题不含任一特征词的材料视为明显无关（pre-filter，非职业评价）。
+DEFAULT_TITLE_REQUIRE_WORDS = [
+    "招聘", "诚聘", "诚邀", "招贤", "引进", "招收", "招录",
+    "博士后", "岗位", "教师", "研究员", "副研究员", "助理研究员",
+    "科研助理", "教授", "副教授", "讲师", "人才", "招聘公告",
+    "招聘启事", "offer", "position", "recruit", "faculty",
+]
+
 
 class SourceConfigError(ValueError):
     """单个 source 配置错误（只影响该 source）。"""
@@ -185,6 +194,13 @@ def ensure_sources_schema() -> dict:
             )
             return {"migrated": True, "reason": "legacy 空配置已迁移到 V0.2 默认 sources"}
     return {"migrated": False, "reason": "无需迁移"}
+
+
+def title_require_filter(title: str | None, custom_words: list[str] | None) -> bool:
+    """标题必须包含至少一个招聘特征词（可配置覆盖）。"""
+    words = custom_words if custom_words is not None else DEFAULT_TITLE_REQUIRE_WORDS
+    lowered = (title or "").lower()
+    return any(str(w).lower() in lowered for w in words)
 
 
 def keyword_filter_passes(

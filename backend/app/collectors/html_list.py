@@ -14,7 +14,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from app.collectors.base import JobCollector, RawJob
-from app.collectors.config import SourceConfig
+from app.collectors.config import SourceConfig, title_require_filter
 from app.collectors.http import SafeFetcher
 
 
@@ -75,12 +75,18 @@ class HtmlListCollector(JobCollector):
         content_selector = detail_config.get("content_selector", "")
 
         results: list[RawJob] = []
+        require_words = selectors.get("title_require_words")
         for node in items:
             href = self._select_attr(node, selectors.get("link") or "a", "href")
             if not href:
                 continue
             url = urljoin(final_url, href)
             title = self._select_text(node, selectors.get("title") or "a")
+            if not title:
+                continue
+            # 标题特征过滤：列表页可能混入导航/新闻，标题不含招聘特征词则跳过
+            if not title_require_filter(title, require_words):
+                continue
             date_raw = self._select_text(node, selectors.get("date") or "")
 
             description = None
