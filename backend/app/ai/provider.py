@@ -8,6 +8,7 @@ AI 输出统一走 `_complete_json`：Pydantic 校验失败自动重试一次，
 from __future__ import annotations
 
 import json
+import logging
 import re
 from abc import ABC, abstractmethod
 
@@ -21,8 +22,14 @@ from app.ai.schemas import (
     ReputationSynthesisOut,
 )
 from app.core.config import Settings, get_settings
+from app.core.endpoints import normalize_base_url, validate_llm_base_url
+
+logger = logging.getLogger(__name__)
 
 _JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+# 允许出现在 AI 错误提示里的受控字段（type / request-id），其余一律不回显
+_SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 
 
 class AIError(Exception):
@@ -94,7 +101,7 @@ class OpenAICompatibleProvider(LLMProvider):
         except httpx.HTTPError as e:
             raise AIError(f"AI 请求失败：{e}") from e
         if resp.status_code >= 400:
-            raise AIError(f"AI 返回 HTTP {resp.status_code}：{resp.text[:300]}")
+            raise AIError(_http_error_message(resp))
         try:
             return resp.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError) as e:
@@ -134,9 +141,55 @@ class OpenAICompatibleProvider(LLMProvider):
 
 
 def get_provider(settings: Settings | None = None) -> LLMProvider | None:
+    """构造 Provider；配置缺失、接口地址不合规、或 endpoint 与密钥绑定不一致
+    时返回 None（AI 显式禁用，路由报 503，不伪造结果）。
+
+    V0.2.4 credential destination integrity：密钥文件里保存的是用户确认过的
+    endpoint；当前 .env 的 LLM_BASE_URL 与之一致才允许发送 Key ——
+    .env 被篡改成另一个 host 时拒绝请求，要求用户在启动器重新确认。"""
     s = settings or get_settings()
     if not (s.llm_api_key and s.llm_base_url and s.llm_model):
         return None
+    url_err = validate_llm_base_url(s.llm_base_url)
+    if url_err:
+        logger.warning("AI 禁用：接口地址不合规 —— %s", url_err)
+        return None
+    from app.core.config import DATA_DIR
+    from app.core.secrets import load_secret, secret_path
+
+    payload = load_secret(secret_path(DATA_DIR))
+    if payload:
+        if not payload.get("base_url"):
+            # 旧格式密钥无绑定信息：保守拒绝，要求重新确认（不发送 Key）
+            logger.warning(
+                "AI 禁用：密钥未绑定接口地址（旧格式），请在启动器「API 设置」重新保存"
+            )
+            return None
+        if normalize_base_url(payload["base_url"]) != normalize_base_url(s.llm_base_url):
+            logger.warning(
+                "AI 禁用：LLM_BASE_URL 与密钥绑定的接口地址不一致"
+                "（绑定 %r，当前 %r）——请在启动器「API 设置」重新确认",
+                payload["base_url"], s.llm_base_url,
+            )
+            return None
     return OpenAICompatibleProvider(
         api_key=s.llm_api_key, base_url=s.llm_base_url, model=s.llm_model
     )
+
+
+def _http_error_message(resp) -> str:
+    """构造 AI HTTP 错误提示：不回显远端错误正文（第三方/恶意 provider 可能
+    把敏感内容放进 body），只保留状态码 + 受控字段（error.type、x-request-id）。"""
+    msg = f"AI 返回 HTTP {resp.status_code}"
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+        etype = data["error"].get("type")
+        if isinstance(etype, str) and _SAFE_TOKEN.match(etype):
+            msg += f"（{etype}）"
+    req_id = resp.headers.get("x-request-id", "")
+    if req_id and _SAFE_TOKEN.match(req_id):
+        msg += f" request-id={req_id}"
+    return msg

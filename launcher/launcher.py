@@ -9,7 +9,8 @@
 - stdout/stderr 实时进入日志窗口；health 检查在后台线程完成、
   经 root.after 回主线程更新 UI 并自动打开浏览器；
 - 「API 设置」：接口地址/模型写 .env；API Key 用 Windows DPAPI 加密存
-  data/llm_secret.bin（无明文），启动时解密注入后端进程环境变量。
+  data/llm_secret.bin（无明文，与接口地址绑定），后端启动时自行解密读取，
+  launcher 不把 Key 注入环境变量。
 
 两种入口：
 - `--serve`：仅启动后端（供本文件自身 subprocess 复用，也便于冒烟验证）；
@@ -271,11 +272,14 @@ def wait_for_health(port: int = DEFAULT_PORT, timeout: float = 30.0) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# API Key 安全存储（V0.2.3）
+# API Key 安全存储（V0.2.3 → V0.2.4）
 #   - 密钥用 Windows DPAPI 加密存 data/llm_secret.bin（绑定当前账户+本机），
 #     磁盘上无明文；.env 只放接口地址/模型名（非机密）；
-#   - 启动时解密注入后端进程环境变量（优先级高于 .env）；
-#   - 旧版 .env 里的明文 LLM_API_KEY 自动迁移为加密存储并删除明文行。
+#   - V0.2.4：密钥载荷 {api_key, base_url} 与 endpoint 绑定；接口地址必须
+#     https（本地模型可 http://127.0.0.1）；后端自行解密密钥文件，
+#     launcher 不再把 Key 注入环境变量（缩小明文驻留范围）；
+#   - 旧版 .env 里的明文 LLM_API_KEY 自动迁移：先加密保存并验证成功，
+#     才删除明文行（失败则保留明文，绝不丢 Key）。
 # ---------------------------------------------------------------------------
 
 def _secret_file() -> Path:
@@ -319,34 +323,39 @@ def _write_env(path: Path, updates: dict[str, str], removes: list[str]) -> None:
 
 
 def _migrate_plaintext_key(log_box=None) -> None:
-    """旧工作流遗留：.env 里有明文 LLM_API_KEY → 迁移为 DPAPI 加密存储，
-    并从 .env 删除明文行（明文无论如何都不留）。"""
+    """旧工作流遗留：.env 里有明文 LLM_API_KEY → 迁移为 DPAPI 加密存储。
+
+    顺序（V0.2.4 安全要求）：先加密写入 + 回读验证成功，才删除 .env 明文行；
+    任何一步失败都保留明文 —— Key 绝不因迁移失败而丢失。"""
     from app.core.secrets import load_secret, save_secret
 
     env_path = _DATA_ROOT / ".env"
-    plain = _read_env(env_path).get("LLM_API_KEY", "")
+    env = _read_env(env_path)
+    plain = env.get("LLM_API_KEY", "")
     if not plain:
         return
-    _write_env(env_path, {}, ["LLM_API_KEY"])
+    base = env.get("LLM_BASE_URL", "")
     secret_f = _secret_file()
-    if load_secret(secret_f) is None:
-        save_secret(plain, secret_f)
+    if load_secret(secret_f) is not None:
+        # 已有加密副本 → 只清明文行
+        _write_env(env_path, {}, ["LLM_API_KEY"])
         if log_box is not None:
-            log_box.insert(tk.END, "[launcher] 检测到 .env 明文密钥，已迁移为加密存储（Windows 账户绑定）\n")
-    elif log_box is not None:
-        log_box.insert(tk.END, "[launcher] 已移除 .env 中的明文密钥（加密副本已存在）\n")
-
-
-def _inject_api_key() -> None:
-    """把加密保存的 API Key 解密后注入后端进程环境变量（优先级高于 .env）。
-    无密钥 → 清除环境变量，后端以"未配置 AI"模式运行。"""
-    from app.core.secrets import load_secret
-
-    key = load_secret(_secret_file())
-    if key:
-        os.environ["LLM_API_KEY"] = key
-    else:
-        os.environ.pop("LLM_API_KEY", None)
+            log_box.insert(tk.END, "[launcher] 已移除 .env 中的明文密钥（加密副本已存在）\n")
+        return
+    try:
+        save_secret({"api_key": plain, "base_url": base or None}, secret_f)
+    except OSError as e:
+        if log_box is not None:
+            log_box.insert(tk.END, f"[launcher] 密钥迁移失败（明文已保留，未删除）：{e}\n")
+        return
+    saved = load_secret(secret_f)
+    if saved is None or saved.get("api_key") != plain:
+        if log_box is not None:
+            log_box.insert(tk.END, "[launcher] 密钥迁移校验失败（明文已保留，未删除）\n")
+        return
+    _write_env(env_path, {}, ["LLM_API_KEY"])
+    if log_box is not None:
+        log_box.insert(tk.END, "[launcher] 检测到 .env 明文密钥，已迁移为加密存储（Windows 账户绑定）\n")
 
 
 def _backend_running() -> bool:
@@ -356,7 +365,10 @@ def _backend_running() -> bool:
 def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> None:
     """API 设置对话框：接口地址/模型名写 .env（非机密）；API Key 走 DPAPI 加密存储。
 
-    独立成模块级函数以便 GUI 测试直接驱动（填表 → 保存 → 清除密钥）。"""
+    V0.2.4：接口地址强制 https（本地模型 http://127.0.0.1 例外）；密钥与接口地址
+    一起加密绑定，.env 被改后后端拒绝发送 Key。独立成模块级函数以便 GUI 测试
+    直接驱动（填表 → 保存 → 清除密钥）。"""
+    from app.core.endpoints import validate_llm_base_url
     from app.core.secrets import delete_secret, load_secret, save_secret
     from tkinter import ttk
 
@@ -365,7 +377,7 @@ def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> 
 
     dlg = tk.Toplevel(root)
     dlg.title("API 设置")
-    dlg.geometry("600x330")
+    dlg.geometry("600x340")
     dlg.resizable(False, False)
     dlg.transient(root)
     dlg.grab_set()
@@ -390,8 +402,9 @@ def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> 
     ttk.Entry(frm, textvariable=key_var, width=64, show="*").grid(row=2, column=1, sticky="we", pady=(0, 8))
     ttk.Label(
         frm,
-        text="密钥输入框留空 = 保留已保存的密钥；密钥只以加密形式存储，\n"
-             "绑定当前 Windows 账户，换机器/换账户后需重新输入。",
+        text="密钥输入框留空 = 保留已保存的密钥；密钥与接口地址一起加密存储，\n"
+             "默认绑定当前 Windows 账户与电脑（个别域/漫游配置存在例外）；\n"
+             "非本机接口必须 https://。换机器/换账户后需重新输入。",
         foreground="#666",
     ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 4))
     ttk.Label(frm, textvariable=status_var2, foreground="#0a7d33").grid(
@@ -405,15 +418,37 @@ def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> 
         base = base_var.get().strip()
         model = model_var.get().strip()
         key = key_var.get().strip()
+        url_err = validate_llm_base_url(base)
+        if url_err:
+            messagebox.showerror("接口地址不合法", url_err, parent=dlg)
+            return
+        # 密钥载荷：输入了新 Key 用新 Key；留空沿用已保存 Key，
+        # 绑定地址始终以本次确认的为准（.env 被改后须在此重新确认）
+        if key:
+            payload = {"api_key": key, "base_url": base or None}
+        else:
+            existing = load_secret(secret_f)
+            if existing is None or not existing.get("api_key"):
+                _write_env(env_path, {"LLM_BASE_URL": base, "LLM_MODEL": model}, ["LLM_API_KEY"])
+                log_box.insert(tk.END, "[launcher] 未输入 API Key：AI 功能保持未配置状态\n")
+                dlg.destroy()
+                return
+            payload = {"api_key": existing["api_key"], "base_url": base or None}
+        try:
+            save_secret(payload, secret_f)
+        except OSError as e:
+            messagebox.showerror("保存失败", f"密钥加密保存失败：{e}", parent=dlg)
+            return
+        saved = load_secret(secret_f)
+        if saved is None or saved.get("api_key") != payload["api_key"]:
+            messagebox.showerror("保存失败", "密钥写入后校验失败，未修改任何配置", parent=dlg)
+            return
         _write_env(env_path, {"LLM_BASE_URL": base, "LLM_MODEL": model}, ["LLM_API_KEY"])
         if key:
-            save_secret(key, secret_f)
             log_box.insert(
                 tk.END,
                 "[launcher] API Key 已加密保存（data/llm_secret.bin，Windows 账户绑定）\n",
             )
-        elif not has_secret:
-            log_box.insert(tk.END, "[launcher] 未输入 API Key：AI 功能保持未配置状态\n")
         hint = "请点击「重启」使配置生效" if _backend_running() else "下次启动自动生效"
         log_box.insert(tk.END, f"[launcher] 接口地址/模型已写入 .env；{hint}\n")
         dlg.destroy()
@@ -427,7 +462,10 @@ def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> 
         delete_secret(secret_f)
         status_var2.set("未设置")
         key_var.set("")
-        log_box.insert(tk.END, "[launcher] API Key 已清除\n")
+        log_box.insert(
+            tk.END,
+            "[launcher] API Key 已清除（运行中的后端需重启后完全生效）\n",
+        )
 
     ttk.Button(btn_row, text="保存", command=do_save).pack(side=tk.LEFT)
     ttk.Button(btn_row, text="清除密钥", command=do_clear).pack(side=tk.LEFT, padx=4)
@@ -524,7 +562,6 @@ def _build_gui() -> None:
             log_box.insert(tk.END, f"[launcher] 检测到上次残留进程 PID {stale}，正在清理…\n")
             manager.cleanup_stale()
         _migrate_plaintext_key(log_box)
-        _inject_api_key()
         status_var.set("Starting…")
         manager.start()
         threading.Thread(target=read_logs, daemon=True).start()

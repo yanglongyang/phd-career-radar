@@ -80,16 +80,19 @@ def get_settings() -> Settings:
 
 
 def _apply_llm_secret(settings: Settings, secret_file: Path | None = None) -> Settings:
-    """V0.2.3：LLM_API_KEY 不以明文存 .env —— 优先用环境变量（launcher 注入），
-    否则从 DPAPI 加密的密钥文件解密（直接 uvicorn 启动也能用）。
-    文件缺失/解密失败 → 保持未配置，AI 功能显式报错，不伪造结果。"""
+    """V0.2.3：LLM_API_KEY 不以明文存 .env —— 优先用环境变量，否则从 DPAPI
+    加密的密钥文件解密（launcher 与直接 uvicorn 启动都能用）。
+    文件缺失/解密失败 → 保持未配置，AI 功能显式报错，不伪造结果。
+
+    V0.2.4：密钥载荷含 {api_key, base_url} endpoint 绑定；绑定校验在
+    provider 层执行（见 app/ai/provider.get_provider），这里只注入 api_key。"""
     if settings.llm_api_key:
         return settings
     from app.core.secrets import load_secret, secret_path
 
-    key = load_secret(secret_file or secret_path(DATA_DIR))
-    if key:
-        settings.llm_api_key = key
+    payload = load_secret(secret_file or secret_path(DATA_DIR))
+    if payload and payload.get("api_key"):
+        settings.llm_api_key = payload["api_key"]
     return settings
 
 

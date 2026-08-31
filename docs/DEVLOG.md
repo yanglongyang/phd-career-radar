@@ -1151,3 +1151,45 @@ RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
 - 全新实例：无密钥时 AI 保持未配置状态（503），密钥文件不存在。
 - 测试：pytest **232 passed**（+8 secrets/GUI/env 工具 +1 迁移）；GUI 对话框
   真实驱动通过（保存/留空保留/清除三场景）。
+
+## V0.2.4 — 安全审查修复（credential destination integrity，2026-08-31）
+
+用户对 294284e3 做安全审查：无 P0，但要求冻结前修复 1 个 P1 + 3 个 P2 + 若干硬化项。全部落实：
+
+**P1：API Key 与 endpoint 绑定 + 强制 HTTPS**
+- `app/core/endpoints.py`：`validate_llm_base_url` —— 非本机接口强制 https://
+  （Key 不以明文过网）；仅 http://127.0.0.1 / http://localhost / http://[::1]
+  放行（本地模型）；拒绝 userinfo（user:pass@）、fragment、其他 scheme、空 host。
+- `secrets.py` 载荷升级为 JSON `{api_key, base_url}`（MAGIC v2）：Key 与用户确认过的
+  接口地址一起加密绑定；兼容 v1 旧格式（可解密但 base_url=None → 按"未绑定"保守拒绝）。
+- `provider.get_provider()`：当前 `.env` 的 LLM_BASE_URL 与绑定不一致（或未绑定）→
+  返回 None（AI 禁用，日志说明原因，要求回启动器重新确认）——`.env` 被篡改成
+  另一个 host 时绝不会自动把 Key 发过去。
+- launcher 对话框保存时校验接口地址，非法直接拒绝并说明原因。
+
+**P2-1：移除 launcher → os.environ 注入**：`_inject_api_key()` 及其调用删除。
+后端（`config._apply_llm_secret`）直接解密密钥文件；明文 Key 不再驻留 launcher
+环境变量与子进程环境，"清除密钥"语义更干净（运行中后端需重启后完全生效，已提示）。
+
+**P2-2：迁移顺序反转**：明文迁移改为 先加密写入（临时文件 + fsync + os.replace
+原子替换）→ 回读验证一致 → 才删除 .env 明文行；任何失败保留明文，Key 绝不丢失。
+`save_secret` 同步改为原子写，`delete_secret` 顺带清理 .tmp。
+
+**P2-3：provider 错误回显 scrub**：HTTP ≥400 不再回传远端正文 `resp.text[:300]`
+（第三方/恶意 provider 可能把敏感内容放进 body），只保留状态码 + 受控字段
+（error.type、x-request-id，均做字符白名单校验）。
+
+**供应链硬化**：`.github/workflows/ci.yml`（pytest@windows / ruff / 前端构建+vitest /
+secret scan 四 job）；`.github/scripts/secret_scan.py` 扫描追踪文件中的
+OpenAI/AWS/GitHub/Google 凭据模式；main 分支开启保护（禁止 force push、required CI）。
+
+**P3**：DPAPI 绑定措辞软化（"默认绑定当前账户与电脑，个别域/漫游配置存在例外"）。
+
+### 验证
+
+- 测试：pytest **249 passed**（+17：endpoint 策略、绑定拒绝/放行、v1 未绑定拒绝、
+  scrub 回显、迁移失败保留明文、GUI 非法地址拒绝保存）；ruff 全绿；secret scan OK。
+- GUI 对话框测试：非法地址（http://evil.example）拒绝保存且不写任何文件；
+  合法保存后载荷含绑定地址且密文文件无明文。
+- 真实 exe 端到端：绑定一致 → AI 正常发起（502 且错误信息只含 HTTP 状态 +
+  error.type，不再回显密钥/正文）；绑定不一致 → 503（AI 禁用，不发送 Key）。

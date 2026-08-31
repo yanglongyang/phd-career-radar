@@ -79,21 +79,27 @@ phd-career-radar/
 - 双击 exe 即自动启动后端并打开浏览器；关闭 Launcher 无条件清理进程树，绝不残留。
 - **打包版 AI 配置（推荐）**：启动器点「API 设置」填写接口地址/模型/API Key——
   接口地址与模型写 exe 旁 `.env`；**API Key 用 Windows DPAPI 加密存储**
-  （`data/llm_secret.bin`，绑定当前 Windows 账户，磁盘上无明文，换机器/换账户需重填），
-  启动时解密注入后端进程，不会出现在 `.env`、不会被 git 追踪。
-  旧版 `.env` 里遗留的明文 `LLM_API_KEY` 会在下次启动时自动迁移为加密存储并删除明文行。
+  （`data/llm_secret.bin`，默认绑定当前 Windows 账户与电脑，个别域/漫游配置存在例外；
+  磁盘上无明文，换机器/换账户需重填），由后端自行解密读取，
+  不经过环境变量、不会出现在 `.env`、不会被 git 追踪。
+  **Key 与接口地址一起加密绑定**：`.env` 里的接口地址被改动后，后端拒绝发送 Key，
+  需在「API 设置」重新确认。接口地址强制 https://（本地模型可例外使用
+  http://127.0.0.1 / http://localhost / http://[::1]），拒绝携带用户名密码等。
+  旧版 `.env` 里遗留的明文 `LLM_API_KEY` 会在下次启动时自动迁移为加密存储
+  （先加密保存并验证成功，才删除明文行），并删除明文。
   直接 `uvicorn` 开发时若没配环境变量，后端也会自动读取同一个加密密钥文件。
+- **供应链硬化**：CI（GitHub Actions）强制 pytest / ruff / 前端构建与测试 /
+  secret scan（扫描追踪文件中 OpenAI/AWS/GitHub/Google 凭据模式）；
+  `main` 分支开启保护（禁止 force push、required CI）。
+  重新打包使用 `scripts/rebuild_exe.sh`（自动保留 exe 旁的 data/ .env config/，
+  不因打包清空用户数据）。
 
-重新打包（全新 clone 可复现的完整流程；`launcher.spec` 已入库，`frontend/dist` 不入库需先构建）：
+重新打包（**务必使用脚本**：PyInstaller `--noconfirm` 会清空 dist，脚本负责保留
+exe 旁的 data/ .env config/；`launcher.spec` 已入库，`frontend/dist` 不入库需先构建）：
 
 ```bash
-cd frontend
-npm ci
-npm run build
-
-cd ../backend
-.venv/Scripts/python -m pip install pyinstaller
-.venv/Scripts/python -m PyInstaller launcher.spec --noconfirm --distpath ../dist --workpath ../build
+npm run build -C frontend        # 或 cd frontend && npm run build
+bash scripts/rebuild_exe.sh      # 打包 → 保留用户数据 → 替换 dist
 ```
 
 ### 开发模式（完整保留）

@@ -803,11 +803,18 @@ def test_parse_source_max_age_days_validation():
 
 def test_html_list_collector_pku_title_attr_date(monkeypatch):
     """北大：真实公告在 li dl dd，日期在 a 的 title 属性里（发布日期：YYYY-MM-DD）。"""
-    html = """<html><body><ul class="mode2Ul">
-      <li><div class="mode2container"><div class="title2"><a class="tit" href="rczp/jxky/index.htm">教学科研</a></div>
-        <dl><dd><a class="gp-f16" href="rczp/jxky/abc.htm" title="2026年北京大学教学科研岗位招聘启事 发布日期：2026-02-14 ">2026年北京大学教学科研岗位招聘启事</a></dd>
-        <dd><a class="gp-f16" href="rczp/bsh/def.htm" title="博士后招聘信息请点此查看 发布日期：2016-11-29">博士后招聘信息请点此查看</a></dd></dl>
-      </div></li></ul></body></html>"""
+    html = (
+        '<html><body><ul class="mode2Ul">'
+        '<li><div class="mode2container"><div class="title2">'
+        '<a class="tit" href="rczp/jxky/index.htm">教学科研</a></div>'
+        '<dl><dd><a class="gp-f16" href="rczp/jxky/abc.htm" '
+        'title="2026年北京大学教学科研岗位招聘启事 发布日期：2026-02-14 ">'
+        '2026年北京大学教学科研岗位招聘启事</a></dd>'
+        '<dd><a class="gp-f16" href="rczp/bsh/def.htm" '
+        'title="博士后招聘信息请点此查看 发布日期：2016-11-29">'
+        '博士后招聘信息请点此查看</a></dd></dl>'
+        '</div></li></ul></body></html>'
+    )
     src = SourceConfig(
         id="pku", name="北大", type="html_list", enabled=True, url="https://hr.pku.edu.cn/",
         organization="北京大学",
