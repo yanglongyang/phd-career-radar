@@ -7,7 +7,9 @@
   （PID 被系统重用的防护：不一致只删文件，绝不 kill 无辜进程）；
 - 停止/关闭时优雅 terminate → 强制 taskkill /T /F 清理整个进程树；
 - stdout/stderr 实时进入日志窗口；health 检查在后台线程完成、
-  经 root.after 回主线程更新 UI 并自动打开浏览器。
+  经 root.after 回主线程更新 UI 并自动打开浏览器；
+- 「API 设置」：接口地址/模型写 .env；API Key 用 Windows DPAPI 加密存
+  data/llm_secret.bin（无明文），启动时解密注入后端进程环境变量。
 
 两种入口：
 - `--serve`：仅启动后端（供本文件自身 subprocess 复用，也便于冒烟验证）；
@@ -26,8 +28,10 @@ import subprocess
 import sys
 import threading
 import time
+import tkinter as tk
 import webbrowser
 from pathlib import Path
+from tkinter import messagebox
 
 if getattr(sys, "frozen", False):
     # PyInstaller：app 包与资源在 _MEIPASS（只读），数据与 PID 文件在 exe 旁
@@ -38,6 +42,8 @@ else:
     BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
     PROJECT_ROOT = BACKEND_DIR.parent
     _DATA_ROOT = PROJECT_ROOT
+    # 开发模式：launcher（GUI）也要能 import app.*（API 设置里的 DPAPI 密钥模块）
+    sys.path.insert(0, str(BACKEND_DIR))
 PID_FILE = _DATA_ROOT / "data" / "backend.pid"
 DEFAULT_PORT = 8000
 
@@ -265,6 +271,172 @@ def wait_for_health(port: int = DEFAULT_PORT, timeout: float = 30.0) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# API Key 安全存储（V0.2.3）
+#   - 密钥用 Windows DPAPI 加密存 data/llm_secret.bin（绑定当前账户+本机），
+#     磁盘上无明文；.env 只放接口地址/模型名（非机密）；
+#   - 启动时解密注入后端进程环境变量（优先级高于 .env）；
+#   - 旧版 .env 里的明文 LLM_API_KEY 自动迁移为加密存储并删除明文行。
+# ---------------------------------------------------------------------------
+
+def _secret_file() -> Path:
+    from app.core.secrets import SECRET_FILE_NAME
+
+    return _DATA_ROOT / "data" / SECRET_FILE_NAME
+
+
+def _read_env(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key, _, value = stripped.partition("=")
+                result[key.strip()] = value.strip()
+    return result
+
+
+def _write_env(path: Path, updates: dict[str, str], removes: list[str]) -> None:
+    """更新 .env：updates 覆盖 KEY=VALUE；removes 删除键（如明文 LLM_API_KEY）。
+    保留注释与其余行；新键追加到文件末尾。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in updates or key in removes:
+                seen.add(key)
+                if key in updates:
+                    out.append(f"{key}={updates[key]}")
+                continue
+        out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def _migrate_plaintext_key(log_box=None) -> None:
+    """旧工作流遗留：.env 里有明文 LLM_API_KEY → 迁移为 DPAPI 加密存储，
+    并从 .env 删除明文行（明文无论如何都不留）。"""
+    from app.core.secrets import load_secret, save_secret
+
+    env_path = _DATA_ROOT / ".env"
+    plain = _read_env(env_path).get("LLM_API_KEY", "")
+    if not plain:
+        return
+    _write_env(env_path, {}, ["LLM_API_KEY"])
+    secret_f = _secret_file()
+    if load_secret(secret_f) is None:
+        save_secret(plain, secret_f)
+        if log_box is not None:
+            log_box.insert(tk.END, "[launcher] 检测到 .env 明文密钥，已迁移为加密存储（Windows 账户绑定）\n")
+    elif log_box is not None:
+        log_box.insert(tk.END, "[launcher] 已移除 .env 中的明文密钥（加密副本已存在）\n")
+
+
+def _inject_api_key() -> None:
+    """把加密保存的 API Key 解密后注入后端进程环境变量（优先级高于 .env）。
+    无密钥 → 清除环境变量，后端以"未配置 AI"模式运行。"""
+    from app.core.secrets import load_secret
+
+    key = load_secret(_secret_file())
+    if key:
+        os.environ["LLM_API_KEY"] = key
+    else:
+        os.environ.pop("LLM_API_KEY", None)
+
+
+def _backend_running() -> bool:
+    return ProcessManager().is_running()
+
+
+def _open_api_settings_dialog(root, log_box, env_path: Path, secret_f: Path) -> None:
+    """API 设置对话框：接口地址/模型名写 .env（非机密）；API Key 走 DPAPI 加密存储。
+
+    独立成模块级函数以便 GUI 测试直接驱动（填表 → 保存 → 清除密钥）。"""
+    from app.core.secrets import delete_secret, load_secret, save_secret
+    from tkinter import ttk
+
+    env = _read_env(env_path)
+    has_secret = load_secret(secret_f) is not None
+
+    dlg = tk.Toplevel(root)
+    dlg.title("API 设置")
+    dlg.geometry("600x330")
+    dlg.resizable(False, False)
+    dlg.transient(root)
+    dlg.grab_set()
+
+    base_var = tk.StringVar(value=env.get("LLM_BASE_URL", ""))
+    model_var = tk.StringVar(value=env.get("LLM_MODEL", ""))
+    key_var = tk.StringVar()
+    status_var2 = tk.StringVar(
+        value="已加密保存（Windows 账户绑定）" if has_secret else "未设置"
+    )
+
+    frm = ttk.Frame(dlg, padding=16)
+    frm.pack(fill=tk.BOTH, expand=True)
+
+    ttk.Label(frm, text="API 接口地址").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(frm, textvariable=base_var, width=64).grid(row=0, column=1, sticky="we", pady=(0, 8))
+
+    ttk.Label(frm, text="模型名称").grid(row=1, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(frm, textvariable=model_var, width=64).grid(row=1, column=1, sticky="we", pady=(0, 8))
+
+    ttk.Label(frm, text="API Key").grid(row=2, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(frm, textvariable=key_var, width=64, show="*").grid(row=2, column=1, sticky="we", pady=(0, 8))
+    ttk.Label(
+        frm,
+        text="密钥输入框留空 = 保留已保存的密钥；密钥只以加密形式存储，\n"
+             "绑定当前 Windows 账户，换机器/换账户后需重新输入。",
+        foreground="#666",
+    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 4))
+    ttk.Label(frm, textvariable=status_var2, foreground="#0a7d33").grid(
+        row=4, column=0, columnspan=2, sticky="w", pady=(0, 12)
+    )
+
+    btn_row = ttk.Frame(frm)
+    btn_row.grid(row=5, column=0, columnspan=2, sticky="e")
+
+    def do_save() -> None:
+        base = base_var.get().strip()
+        model = model_var.get().strip()
+        key = key_var.get().strip()
+        _write_env(env_path, {"LLM_BASE_URL": base, "LLM_MODEL": model}, ["LLM_API_KEY"])
+        if key:
+            save_secret(key, secret_f)
+            log_box.insert(
+                tk.END,
+                "[launcher] API Key 已加密保存（data/llm_secret.bin，Windows 账户绑定）\n",
+            )
+        elif not has_secret:
+            log_box.insert(tk.END, "[launcher] 未输入 API Key：AI 功能保持未配置状态\n")
+        hint = "请点击「重启」使配置生效" if _backend_running() else "下次启动自动生效"
+        log_box.insert(tk.END, f"[launcher] 接口地址/模型已写入 .env；{hint}\n")
+        dlg.destroy()
+
+    def do_clear() -> None:
+        if load_secret(secret_f) is None:
+            log_box.insert(tk.END, "[launcher] 当前没有已保存的密钥\n")
+            return
+        if not messagebox.askyesno("清除密钥", "确定清除已保存的 API Key 吗？", parent=dlg):
+            return
+        delete_secret(secret_f)
+        status_var2.set("未设置")
+        key_var.set("")
+        log_box.insert(tk.END, "[launcher] API Key 已清除\n")
+
+    ttk.Button(btn_row, text="保存", command=do_save).pack(side=tk.LEFT)
+    ttk.Button(btn_row, text="清除密钥", command=do_clear).pack(side=tk.LEFT, padx=4)
+    ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side=tk.LEFT, padx=4)
+
+    frm.columnconfigure(1, weight=1)
+
+
+# ---------------------------------------------------------------------------
 # 后端服务入口（--serve）：供 launcher 自身 subprocess 复用
 # ---------------------------------------------------------------------------
 
@@ -284,7 +456,6 @@ def serve(port: int = DEFAULT_PORT) -> None:
 # ---------------------------------------------------------------------------
 
 def _build_gui() -> None:
-    import tkinter as tk
     from tkinter import ttk
 
     manager = ProcessManager()
@@ -352,6 +523,8 @@ def _build_gui() -> None:
         if stale is not None:
             log_box.insert(tk.END, f"[launcher] 检测到上次残留进程 PID {stale}，正在清理…\n")
             manager.cleanup_stale()
+        _migrate_plaintext_key(log_box)
+        _inject_api_key()
         status_var.set("Starting…")
         manager.start()
         threading.Thread(target=read_logs, daemon=True).start()
@@ -374,6 +547,9 @@ def _build_gui() -> None:
 
     def open_page() -> None:
         webbrowser.open(url_var.get())
+
+    def _open_api_settings() -> None:
+        _open_api_settings_dialog(root, log_box, _DATA_ROOT / ".env", _secret_file())
 
     def on_close() -> None:
         # 无条件 stop：manager.stop() 对"Launcher 自己持有的活进程"直接 terminate，
@@ -402,6 +578,7 @@ def _build_gui() -> None:
     stop_btn.pack(side=tk.LEFT, padx=4)
     ttk.Button(buttons, text="重启", command=restart).pack(side=tk.LEFT, padx=4)
     ttk.Button(buttons, text="打开页面", command=open_page).pack(side=tk.LEFT, padx=4)
+    ttk.Button(buttons, text="API 设置", command=_open_api_settings).pack(side=tk.LEFT, padx=4)
     ttk.Checkbutton(buttons, text="启动成功后自动打开浏览器", variable=auto_open).pack(side=tk.LEFT, padx=(16, 0))
 
     log_frame = ttk.LabelFrame(frame, text="实时日志")

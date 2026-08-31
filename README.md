@@ -77,8 +77,12 @@ phd-career-radar/
   都在 exe 同目录**（config/ 与 data/，首次运行自动从内置默认配置种子化；
   更新程序不会覆盖个人权重/地区偏好）。
 - 双击 exe 即自动启动后端并打开浏览器；关闭 Launcher 无条件清理进程树，绝不残留。
-- **打包版 AI 配置**：把 `.env` 放在 `dist/PhD Career Radar/.env`（exe 同目录）——
-  开发模式读项目根 `.env`，打包模式读 exe 旁 `.env`，两者互不影响。
+- **打包版 AI 配置（推荐）**：启动器点「API 设置」填写接口地址/模型/API Key——
+  接口地址与模型写 exe 旁 `.env`；**API Key 用 Windows DPAPI 加密存储**
+  （`data/llm_secret.bin`，绑定当前 Windows 账户，磁盘上无明文，换机器/换账户需重填），
+  启动时解密注入后端进程，不会出现在 `.env`、不会被 git 追踪。
+  旧版 `.env` 里遗留的明文 `LLM_API_KEY` 会在下次启动时自动迁移为加密存储并删除明文行。
+  直接 `uvicorn` 开发时若没配环境变量，后端也会自动读取同一个加密密钥文件。
 
 重新打包（全新 clone 可复现的完整流程；`launcher.spec` 已入库，`frontend/dist` 不入库需先构建）：
 
@@ -141,7 +145,8 @@ npm run build                            # tsc 类型检查 + 产物构建
 
 ## 配置 AI
 
-复制 `.env.example` 为 `.env`，填写 OpenAI-compatible API 信息：
+**打包版（exe）推荐直接用启动器的「API 设置」**（密钥自动加密存储，见上文）。
+开发模式可复制 `.env.example` 为 `.env` 填写 OpenAI-compatible API 信息：
 
 ```env
 LLM_PROVIDER=openai_compatible

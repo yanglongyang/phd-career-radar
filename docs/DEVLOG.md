@@ -1117,3 +1117,37 @@ RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
 - 旧库升级模拟：缺列数据库 → create_all + ensure_missing_columns → 补列成功、旧行默认 0、runner 正常。
 - 迁移 `87c3300ba3ba`：collector_runs / collector_run_items 增加 recency_skipped_count（server_default 0）。
 - 测试：pytest **223 passed**（+5 collector 日期/过滤 +2 迁移）；vitest **25 passed**；tsc 通过。
+
+## V0.2.3 — API Key 集成启动器（加密存储 + GitHub 防泄露，2026-08-31）
+
+用户要求：API Key 输入集成到启动 exe；不能明文保存；不能在上传 GitHub 时泄露。
+
+实现：
+
+1. **Windows DPAPI 加密存储（app/core/secrets.py）**：用系统自带 CryptProtectData/
+   CryptUnprotectData（ctypes 调用，无第三方依赖）加密 API Key，存 data/llm_secret.bin
+   （MAGIC + 密文，磁盘无明文）。密文绑定当前 Windows 账户 + 本机：文件被他人拿到、
+   复制到别的机器、换账户登录都无法解密（load 返回 None，不崩溃不泄露）。
+2. **启动器「API 设置」对话框（launcher.py）**：接口地址/模型名写 .env（非机密）；
+   API Key 输入框（掩码显示）→ 加密保存；留空保存 = 保留已有密钥；「清除密钥」按钮
+   带确认框。启动时解密注入后端进程环境变量（优先级高于 .env）。
+3. **明文自动迁移**：旧版 .env 里遗留的明文 LLM_API_KEY 在启动时自动加密迁移，
+   并删除 .env 中的明文行（无论是否有加密副本，明文一律不留）。
+4. **后端兜底（app/core/config.py _apply_llm_secret）**：环境变量为空时自动读取
+   同一个加密密钥文件 —— 直接 uvicorn 开发启动也能用，密钥始终不进 .env。
+5. **GitHub 防泄露**：.env 与 data/llm_secret.bin 均已在 .gitignore；核查确认
+   仓库中无真实密钥（仅 .env.example 占位符 sk-xxx）。
+6. **重打包不再丢数据（scripts/rebuild_exe.sh）**：PyInstaller --noconfirm 会清空
+   dist 目录（连带 exe 旁 data/ 数据库、.env、config/）—— 此前每次重打包都会静默
+   清掉用户数据。脚本改为：打包到临时目录 → 复制旧版 data/ .env config/ → 再替换。
+7. **GUI 驱动测试（test_launcher_gui.py）**：真实 Tk 窗口自动化驱动对话框
+   （预填 → 保存 → 校验 .env 无明文 + 加密文件可解密 → 留空保留 → 清除密钥）。
+
+### 验证
+
+- 真实 exe 端到端：.env 放明文密钥启动 → 自动迁移（.env 密钥行删除、llm_secret.bin
+  生成且可解密回原值）→ 后端 AI 调用带上该密钥（evaluate 返回 502 且错误信息中
+  可见被掩码的密钥，而非 503"未配置"）。
+- 全新实例：无密钥时 AI 保持未配置状态（503），密钥文件不存在。
+- 测试：pytest **232 passed**（+8 secrets/GUI/env 工具 +1 迁移）；GUI 对话框
+  真实驱动通过（保存/留空保留/清除三场景）。

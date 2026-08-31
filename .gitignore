@@ -17,6 +17,7 @@ data/*.db
 data/*.pid
 data/*.db-journal
 data/*.sqlite3
+data/llm_secret.bin
 
 # IDE / 系统
 .idea/

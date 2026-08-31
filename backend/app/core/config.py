@@ -75,7 +75,22 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    return _apply_llm_secret(settings)
+
+
+def _apply_llm_secret(settings: Settings, secret_file: Path | None = None) -> Settings:
+    """V0.2.3：LLM_API_KEY 不以明文存 .env —— 优先用环境变量（launcher 注入），
+    否则从 DPAPI 加密的密钥文件解密（直接 uvicorn 启动也能用）。
+    文件缺失/解密失败 → 保持未配置，AI 功能显式报错，不伪造结果。"""
+    if settings.llm_api_key:
+        return settings
+    from app.core.secrets import load_secret, secret_path
+
+    key = load_secret(secret_file or secret_path(DATA_DIR))
+    if key:
+        settings.llm_api_key = key
+    return settings
 
 
 @lru_cache
