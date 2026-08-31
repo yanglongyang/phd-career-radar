@@ -134,18 +134,20 @@ def load_sources() -> tuple[list[SourceConfig], list[dict]]:
             continue
         source_id = str(item.get("id", "")).strip()
         name = str(item.get("name", "")).strip() or source_id or f"item#{index}"
-        # id 全局唯一（P0-1）
-        if source_id in seen_ids:
-            errors.append({"source_id": source_id, "name": name,
-                           "error": f"source id 重复: {source_id!r}（id 必须全局唯一）"})
-            continue
+        # id 全局唯一（Final closure）：先登记非空 id 再解析 ——
+        # 即使第一个同名 source 配置失败，后续同名 source 也不能合法执行
+        if source_id:
+            if source_id in seen_ids:
+                errors.append({"source_id": source_id, "name": name,
+                               "error": f"source id 重复: {source_id!r}（id 必须全局唯一）"})
+                continue
+            seen_ids.add(source_id)
         try:
             parsed = parse_source(item)
         except SourceConfigError as e:
             errors.append({"source_id": source_id or f"item#{index}", "name": name,
                            "error": str(e)})
             continue
-        seen_ids.add(source_id)
         valid.append(parsed)
     return valid, errors
 

@@ -162,7 +162,7 @@ LLM_MODEL=gpt-4o-mini
 | `config/profile.yaml` | 研究方向、技能、Hard Filters（触发即推荐等级 X） |
 | `config/scoring.yaml` | 8 维评分权重、推荐等级阈值/封顶规则、地区子权重 |
 | `config/regions.yaml` | 地区偏好分层（preferred/acceptable/neutral/avoid） |
-| `config/sources.yaml` | 未来 Collector 来源（V0.1 未启用） |
+| `config/sources.yaml` | V0.2 Collector 来源配置（enabled/type/selector/mapping/关键词过滤；schema_version 2） |
 
 修改权重/偏好后，可在设置页点击“用当前配置重新评估全部岗位”一键批量重评（也可在岗位详情页逐个“重新评估”）。设置保存后配置缓存立即失效，立即生效。
 

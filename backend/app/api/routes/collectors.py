@@ -251,6 +251,12 @@ def link_imported_job(job_id: int, payload: LinkImportedPayload, db: Session = D
     job = db.get(Job, payload.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"正式岗位不存在: {payload.job_id}")
+    # Final closure：已链接到不同 Job 时禁止静默重绑（provenance 不被改写）
+    if row.imported_job_id is not None and row.imported_job_id != payload.job_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该招聘材料已链接到岗位 #{row.imported_job_id}，禁止重绑到 #{payload.job_id}",
+        )
     row.status = "imported"
     row.imported_job_id = payload.job_id
     db.commit()

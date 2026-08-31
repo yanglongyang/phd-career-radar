@@ -1014,3 +1014,28 @@ RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
 
 - pytest：**211 passed**（+6 V0.2.1 测试）；vitest：**25 passed**（+8）；
   ruff：All checks passed；前端 build：通过；闭环冒烟：通过。
+
+---
+
+## V0.2.1 Final Closure（2026-08-31 完成）
+
+最后两个完整性回归 + 两个边角 + 文档。
+
+1. **全失败 → status=failed**：run 状态判断改为
+   `全部失败 → failed / 部分失败 → partial_failure / 否则 completed`——
+   此前 8/8 全失败会错误标成 partial_failure（completed_source_count 修正后
+   failed 状态几乎不可达）。测试：A/B/C 全失败 → completed=3、failed=3、status=failed。
+2. **默认 sources.yaml 加 schema_version: 2**：仓库默认配置带版本号——
+   全新安装 seed 后用户主动清空 collectors 会被尊重，不再被误判为 V0.1.1 legacy
+   而恢复默认 8 个 source。测试：seed（带版本）→ 用户清空 → ensure 不恢复。
+3. **duplicate id 先登记再解析**：同名 id 即使第一个配置失败，第二个也不得合法执行
+   （此前 seen_ids 只在解析成功后登记，坏 A + 好 A 会出现 A failed + A success）。
+   测试：bad A + good A → valid 为空、两条 error。
+4. **link-imported-job 禁止静默重绑**：已链接到 Job A 后再链接 Job B → 409
+   "禁止重绑"；同一 Job 幂等仍 200。测试覆盖重绑拒绝与 provenance 不被改写。
+5. **README**：sources.yaml 配置表更新为"V0.2 Collector 来源配置（schema_version 2）"。
+
+### 测试 / lint / build
+
+- pytest：**216 passed**（+5 closure 回归）；vitest：25 passed；ruff：All checks passed；
+  前端 build：通过。无新 migration、无真实站点冒烟（代码闭环已对得上）。

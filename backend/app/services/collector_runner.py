@@ -95,13 +95,13 @@ def run_collectors(
     run.finished_at = _now()
     # P1-4：completed = success + failed + skipped（运行已结束就应显示完成）
     run.completed_source_count = sum(1 for i in run.items if i.status != "running")
-    run.status = (
-        "failed"
-        if run.completed_source_count == 0 and run.source_count > 0
-        else "partial_failure"
-        if run.failed_source_count > 0
-        else "completed"
-    )
+    # Final closure：全部 source 失败 → failed；部分失败 → partial_failure
+    if run.source_count > 0 and run.failed_source_count == run.source_count:
+        run.status = "failed"
+    elif run.failed_source_count > 0:
+        run.status = "partial_failure"
+    else:
+        run.status = "completed"
     run.discovered_count = sum(i.fetched_count for i in run.items)
     run.new_count = sum(i.new_count for i in run.items)
     run.duplicate_count = sum(i.duplicate_count for i in run.items)
