@@ -66,11 +66,18 @@ phd-career-radar/
 - 程序资源（前端、默认配置、Prompts）随 exe 内置；**用户配置、.env、SQLite、PID 文件
   都在 exe 同目录**（config/ 与 data/，首次运行自动从内置默认配置种子化；
   更新程序不会覆盖个人权重/地区偏好）。
+- 双击 exe 即自动启动后端并打开浏览器；关闭 Launcher 无条件清理进程树，绝不残留。
+- **打包版 AI 配置**：把 `.env` 放在 `dist/PhD Career Radar/.env`（exe 同目录）——
+  开发模式读项目根 `.env`，打包模式读 exe 旁 `.env`，两者互不影响。
 
-重新打包（需要 Python 3.11+ 与 PyInstaller；`launcher.spec` 已入库，从 backend 目录运行即可复现）：
+重新打包（全新 clone 可复现的完整流程；`launcher.spec` 已入库，`frontend/dist` 不入库需先构建）：
 
 ```bash
-cd backend
+cd frontend
+npm ci
+npm run build
+
+cd ../backend
 .venv/Scripts/python -m pip install pyinstaller
 .venv/Scripts/python -m PyInstaller launcher.spec --noconfirm --distpath ../dist --workpath ../build
 ```

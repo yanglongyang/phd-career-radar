@@ -862,3 +862,32 @@ ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e77
 - pytest：**178 passed**（+3：SPA 404、frozen 种子化、PID 复用防护 ×2/旧格式）；
   vitest：17 passed；ruff：All checks passed；前端 build：通过；
   exe 重新打包并冒烟（health/SPA/SPA 路由/未知 API 404/配置种子化/数据落 exe 旁）。
+
+---
+
+## V0.1.1 Last UX Closure（2026-08-31 完成）
+
+把"双击即用、关闭即净"落实到 GUI 入口。三项 + 一个真实 bug 修复。
+
+1. **双击即启动**：GUI 初始化完成后 `root.after(200, start)` —— 双击 exe →
+   自动启动后端 → health OK → 自动打开浏览器（不再需要手动点"启动"）。
+2. **关闭即净**：`on_close()` 改为**无条件** `manager.stop()` —— 不再依赖
+   `is_running()`（PID 存活 + 身份校验）前置判断。对 Launcher 自己持有的活进程
+   stop() 直接 terminate，即使 PID 文件损坏/身份校验失败也绝不残留后端。
+   新增回归测试：self.proc alive + 身份校验失败 → stop() 仍 terminate owned proc。
+3. **README 构建流程完整化**：全新 clone 复现需 `cd frontend && npm ci && npm run build`
+   再打包（frontend/dist 不入库）；并明确**打包版 AI 配置把 .env 放在 exe 同目录**。
+4. **真实 bug 修复（GUI 实测发现）**：Tk 变量（StringVar/BooleanVar）原先在
+   `tk.Tk()` 之前创建，GUI 一打开即崩溃（"Too early to create variable"）——
+   调整初始化顺序到 root 创建之后。真实验证：GUI 模式启动 14 秒后端自动就绪
+   （health 200 + JSON PID 文件），进程清理干净。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**179 passed**（+1：owned-proc 强制终止回归）；vitest：17 passed；
+  ruff：All checks passed；前端 build：通过；
+  GUI 自动启动真实验证 + exe 重打包冒烟（health/SPA/未知 API 404/配置种子化）。

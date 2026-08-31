@@ -289,15 +289,17 @@ def _build_gui() -> None:
 
     manager = ProcessManager()
     log_queue: queue.Queue[str] = queue.Queue()
-    status_var = tk.StringVar(value="Stopped")
-    pid_var = tk.StringVar(value="—")
-    url_var = tk.StringVar(value=f"http://127.0.0.1:{manager.port}")
-    auto_open = tk.BooleanVar(value=True)
 
     root = tk.Tk()
     root.title("PhD Career Radar Launcher")
     root.geometry("720x480")
     root.minsize(560, 380)
+
+    # Tk 变量必须在 root 创建之后初始化（否则 "Too early to create variable"）
+    status_var = tk.StringVar(value="Stopped")
+    pid_var = tk.StringVar(value="—")
+    url_var = tk.StringVar(value=f"http://127.0.0.1:{manager.port}")
+    auto_open = tk.BooleanVar(value=True)
 
     def read_logs() -> None:
         """把子进程输出搬进队列，再由 GUI 线程刷新。"""
@@ -374,8 +376,9 @@ def _build_gui() -> None:
         webbrowser.open(url_var.get())
 
     def on_close() -> None:
-        if manager.is_running():
-            manager.stop()
+        # 无条件 stop：manager.stop() 对"Launcher 自己持有的活进程"直接 terminate，
+        # 不依赖 PID 身份验证 —— 关掉启动器就绝不残留后端。
+        manager.stop()
         root.destroy()
 
     # ---- 布局 ----
@@ -409,6 +412,8 @@ def _build_gui() -> None:
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.after(100, pump_logs)
     root.after(1000, refresh_status)
+    # V0.1.1 UX：双击 exe → 自动启动后端 → health OK → 自动打开浏览器
+    root.after(200, start)
     root.mainloop()
 
 

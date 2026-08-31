@@ -256,3 +256,41 @@ def test_frozen_user_config_seeded_from_bundle(tmp_path):
     (user_config / "regions.yaml").write_text("preferred: [南京]", encoding="utf-8")
     seed_user_config(resource, user_config)
     assert "南京" in (user_config / "regions.yaml").read_text(encoding="utf-8")
+
+
+def test_stop_terminates_owned_proc_even_if_identity_fails(monkeypatch, tmp_path):
+    """V0.1.1 UX：Launcher 自己持有的进程（self.proc alive）即使身份校验失败
+    （PID 文件损坏/marker 缺失），stop() 也必须 terminate —— 关闭即净。"""
+    launcher_mod = _load_launcher()
+    ProcessManager = launcher_mod.ProcessManager
+
+    manager = ProcessManager(pid_file=tmp_path / "backend.pid", port=8127)
+    pid_file = manager.pid_file
+    pid_file.write_text("not-json", encoding="utf-8")  # 损坏的 PID 文件
+
+    class FakeProc:
+        pid = 4242
+
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return None  # 永远 alive
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    fake = FakeProc()
+    manager.proc = fake
+    monkeypatch.setattr(launcher_mod, "_is_alive", lambda pid: True)
+    monkeypatch.setattr(launcher_mod, "_process_creation_time", lambda pid: None)
+
+    # 身份校验失败（marker 缺失）→ is_running False，但 stop 仍必须 terminate owned proc
+    assert manager.is_running() is False
+    manager.stop()
+    assert fake.terminated is True
+    assert not pid_file.exists()
+    assert manager.proc is None
