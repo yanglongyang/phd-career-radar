@@ -395,3 +395,63 @@ export interface ReEvaluateResult {
   succeeded: number[];
   failed: { job_id: number; error: string }[];
 }
+
+export interface CollectorRunItem {
+  id: number;
+  source_id: string;
+  source_name: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  fetched_count: number;
+  new_count: number;
+  duplicate_count: number;
+  possible_duplicate_count: number;
+  filtered_count: number;
+  error_message: string | null;
+}
+
+export interface CollectorRun {
+  id: number;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  trigger: string;
+  source_count: number;
+  completed_source_count: number;
+  discovered_count: number;
+  new_count: number;
+  duplicate_count: number;
+  possible_duplicate_count: number;
+  filtered_count: number;
+  failed_source_count: number;
+  items: CollectorRunItem[];
+}
+
+export interface DiscoveredJob {
+  id: number;
+  source_id: string;
+  source_name: string;
+  source_job_id: string | null;
+  source_url: string;
+  canonical_url: string | null;
+  title_raw: string | null;
+  description_raw: string | null;
+  published_at_raw: string | null;
+  organization_hint: string | null;
+  location_hint: string | null;
+  status: string;
+  discovered_at: string;
+  last_seen_at: string;
+  first_run_id: number | null;
+  last_run_id: number | null;
+  possible_duplicate_of_id: number | null;
+  duplicate_reason: string | null;
+  imported_job_id: number | null;
+  raw_payload: unknown;
+}
+
+export interface DiscoveredJobList {
+  items: DiscoveredJob[];
+  total: number;
+}

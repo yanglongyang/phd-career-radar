@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/jobs", label: "岗位库" },
+  { to: "/discovered", label: "招聘发现" },
   { to: "/applications", label: "申请 CRM" },
   { to: "/organizations", label: "单位库" },
   { to: "/settings", label: "设置" },
@@ -50,7 +51,9 @@ export default function Layout() {
               className={({ isActive }) =>
                 cn(
                   "block rounded-md px-3 py-2 text-sm transition-colors",
-                  isActive || (item.to === "/jobs" && location.pathname.startsWith("/jobs"))
+                  isActive ||
+                    (item.to === "/jobs" && location.pathname.startsWith("/jobs")) ||
+                    (item.to === "/discovered" && location.pathname.startsWith("/discovered"))
                     ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
                     : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-200",
                 )

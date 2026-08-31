@@ -891,3 +891,74 @@ ruff 全绿、前端 build 通过、alembic 迁移链（e2bcd6b51463 → 4a48e77
 - pytest：**179 passed**（+1：owned-proc 强制终止回归）；vitest：17 passed；
   ruff：All checks passed；前端 build：通过；
   GUI 自动启动真实验证 + exe 重打包冒烟（health/SPA/未知 API 404/配置种子化）。
+
+---
+
+## V0.2 — Collector MVP（2026-08-31 完成）
+
+把工作台升级为"发现 → 去重 → 人工审核 → AI 结构化 → 评价 → CRM"全链路。
+Collector 只负责发现公开招聘材料（DiscoveredJob），从不直接创建正式 Job；
+正式 Job 只能由用户确认后的现有 AI Extraction Preview 流程创建。
+
+### 已实现
+
+1. **模型 + migration**（937a152aeca9 → 37f788d24311）：
+   - CollectorRun（运行审计：状态/各计数/触发方式）、CollectorRunItem（source 级结果 + 错误信息限 500 字符）、
+     DiscoveredJob（Inbox：source 信息/canonical URL/fingerprint/状态/first_run/last_run/possible_duplicate 标记）；
+   - 状态机独立于 Job.status（new/reviewing/ignored/imported/possible_duplicate）；
+   - 冻结阶段模型零改动。
+2. **sources.yaml 正式运行语义**：id 唯一、enabled 严格 boolean、未知 type 报错、配置错误只影响当前 source、
+   关键词过滤器（include/exclude，确定性可解释，filtered_count 保留）。
+3. **JsonApiCollector + HtmlListCollector**：selector/mapping 全由配置驱动（不写死任何站点）；
+   dotted path（data.jobs/result.items）；detail.fetch_detail=false 支持；单条 detail 失败不影响整个 source；
+   URL 相对解析。
+4. **安全 HTTP 组件**（collectors/http.py）：复用 Phase 3 SSRF 思路（公网 IP、每跳重定向校验、大小限制、
+   Content-Type 验证、timeout）——不重写第二套逻辑。
+5. **去重引擎**（services/collector_dedupe.py）：Level1 source_job_id → Level2 canonical URL（fragment/trailing
+   slash/scheme-host 标准化 + 仅删 utm_*，保留可能代表职位 ID 的 query）→ Level3 fingerprint（org+title+path）→
+   Level4 possible duplicate（同单位+标题相似≥80%+URL 不同 → 只标记不合并）。
+6. **Runner**（services/collector_runner.py）：逐 source **savepoint 独立事务**（A 成功 → B 失败 → C 成功，
+   查库确认 A/C 数据保留、B 标记 failed）；确定性重复更新 last_seen/last_run_id，first_run/discovered_at 保持。
+7. **API**：POST /collectors/run（同步返回含 source 级状态）、GET /collectors/runs(/id)、GET /collectors/sources、
+   GET/PATCH /discovered-jobs（status 流转校验）、POST /discovered-jobs/{id}/extract（接入现有 Phase 3
+   extraction，返回 preview，状态推进 reviewing，不创建正式 Job）。
+8. **前端**：侧边栏"招聘发现"；立即检查按钮 + 上次运行摘要（新增/重复/疑似/过滤/失败 + source 级行）+
+   Inbox 表格（状态 Badge、疑似重复 Badge + 原因、查看原文/详情/AI 解析/忽略/恢复）+ 详情页（原始正文/元信息/重复判断）；
+   AI 解析 → sessionStorage 桥接 → 现有导入页 Preview → 确认 → 正式 Job。
+
+### 真实 Sources 冒烟（2026-08-31，8 个公开来源）
+
+| source | 结果 | 说明 |
+| --- | --- | --- |
+| 上海交通大学人才招聘 | ✅ 13 抓取/1 新增（关键词过滤 11） | html_list |
+| 中科院人才招聘网 | ✅ 173 抓取/16 新增/1 重复（过滤 153） | html_list |
+| 复旦大学人事处 | ✅ 0 匹配（选择器未命中列表项） | html_list |
+| 中科院上海有机所 | ✅ 0 匹配 | html_list |
+| 南京大学人才招聘 | ❌ HTTP 410 | 站点技术限制，按设计隔离 |
+| 中科院化学所 | ❌ HTTP 404 | 同上 |
+| 西湖大学 | ❌ HTTP 500 | 同上 |
+| 高校人才网 | ❌ HTTP 404 | 同上 |
+
+- 第一次运行：21 条进入 Inbox（17 新增 + 4 possible_duplicate）；
+- **第二次运行：new=0、dup=22、Inbox 总数不变（21）**——去重是数据库级生效；
+  first_run=1/last_run=2（first_seen 保持、last_seen 更新）；
+- 第三次（经 UI/API）：new=0、dup=22、4 source 稳定失败——失败隔离与可审计性成立。
+
+### 已知限制
+
+- 4 个 source 因站点返回 4xx/5xx 或技术限制失败（按"unsupported_in_v0.2"处理，不强行突破）；
+  选择器按当前站点结构配置，站点改版需调整 sources.yaml；
+- 同步执行（几十秒），未做后台任务/调度（按规格留 V0.2.x）；
+- possible duplicate 目前只按同单位+标题相似判定，发布时间接近度尚未纳入（原因字段已可扩展）。
+
+### 明确未实现（按规格）
+
+定时调度、Windows Scheduler、Playwright、BOSS/智联/猎聘/前程无忧、登录态站点、验证码/反爬、
+RSS/Sitemap Collector、自动投递/联系 HR、AI 参与去重判断。
+
+### 测试 / lint / build
+
+- pytest：**205 passed**（+26：config 解析 4、去重 5、JsonApi 4、HtmlList 4、runner 事务/去重/last_seen/
+  possible/filter 5、API 端到端 3、extract bridge 2 等）；vitest：17 passed；ruff：All checks passed；
+  前端 build：通过；真实抓取三次冒烟：通过。
+- migration 链：e2bcd6b51463 → 4a48e7786118 → d281b97059b5 → 937a152aeca9 → 37f788d24311。

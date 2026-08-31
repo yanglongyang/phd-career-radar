@@ -77,13 +77,25 @@ const ACADEMIC_GROUPS: GroupDef[] = [
 ];
 
 export default function JobImportPage() {
+  const inboxPreview = (() => {
+    const raw = sessionStorage.getItem("pcr-inbox-preview");
+    if (!raw) return null;
+    sessionStorage.removeItem("pcr-inbox-preview");
+    try {
+      return JSON.parse(raw) as { preview: ExtractionPreview; sourceId: number };
+    } catch {
+      return null;
+    }
+  })();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [source, setSource] = useState<"text" | "url">("text");
   const [text, setText] = useState("");
   const [pageUrl, setPageUrl] = useState("");
-  const [preview, setPreview] = useState<ExtractionPreview | null>(null);
-  const [values, setValues] = useState<Record<string, FieldValue>>({});
+  const [preview, setPreview] = useState<ExtractionPreview | null>(inboxPreview?.preview ?? null);
+  const [values, setValues] = useState<Record<string, FieldValue>>(
+    inboxPreview ? seedValuesFromPreview(inboxPreview.preview) : {},
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [duplicateOf, setDuplicateOf] = useState<{ id: number; title: string } | null>(null);
 

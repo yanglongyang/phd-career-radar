@@ -1,12 +1,164 @@
-# 招聘信息来源配置（Collector 架构，Phase 7 已定义接口）
-# CollectorRegistry.run_configured() 读取本文件的 enabled 清单；
-# 真实爬虫仍未实现（反爬对抗明确不做），当前导入方式为手工 / 粘贴文本 / URL。
+# 招聘信息来源配置（V0.2 Collector MVP）
+# CollectorRegistry/runner 读取 enabled 清单；真实爬虫仅 JsonApiCollector / HtmlListCollector。
+# 关键词过滤为确定性 pre-filter（减少明显无关材料，不构成职业评价）。
+collectors:
+  - id: nju_hr
+    name: 南京大学人才招聘
+    type: html_list
+    enabled: true
+    category: university
+    organization: 南京大学
+    url: https://hr.nju.edu.cn/zpgg/list.htm
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "ul.news_list li"
+      title: "a"
+      link: "a"
+      date: "span"
+    detail:
+      fetch_detail: true
+      content_selector: ".wp_articlecontent"
+    filters:
+      include_keywords: [化学, 药学, 生物, 医学, 材料, 教授, 研究员, 博士后]
+      exclude_keywords: [辅导员, 行政, 后勤]
 
-collectors: []
-# 未来示例：
-#   - name: 某高校人才招聘网
-#     type: html_list
-#     enabled: false
-#     url: https://example.edu.cn/hr/
-#     job_categories: [university_faculty]
-#     schedule: daily
+  - id: fudan_hr
+    name: 复旦大学人事处
+    type: html_list
+    enabled: true
+    category: university
+    organization: 复旦大学
+    url: https://hr.fudan.edu.cn/rcry/list.htm
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "ul.news_list li"
+      title: "a"
+      link: "a"
+      date: "span"
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [化学, 生物, 医学, 材料, 教授, 研究员, 博士后]
+      exclude_keywords: [辅导员, 行政]
+
+  - id: sjtu_join
+    name: 上海交通大学人才招聘
+    type: html_list
+    enabled: true
+    category: university
+    organization: 上海交通大学
+    url: https://join.sjtu.edu.cn/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "li"
+      title: "a"
+      link: "a"
+      date: ""
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [化学, 生物, 材料, 教授, 研究员, 博士后]
+      exclude_keywords: [辅导员, 行政]
+
+  - id: sioc_rcjy
+    name: 中科院上海有机所人才教育
+    type: html_list
+    enabled: true
+    category: research_institute
+    organization: 中国科学院上海有机化学研究所
+    url: https://www.sioc.ac.cn/rcjy/rczp/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "li"
+      title: "a"
+      link: "a"
+      date: ""
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [研究, 岗位, 招聘, 博士后, 副研究员, 研究员]
+      exclude_keywords: [夏令营, 招生]
+
+  - id: ic_cas_rcjy
+    name: 中科院化学所人才招聘
+    type: html_list
+    enabled: true
+    category: research_institute
+    organization: 中国科学院化学研究所
+    url: http://www.ic.cas.cn/rcjy/rczp/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "li"
+      title: "a"
+      link: "a"
+      date: ""
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [招聘, 研究, 博士后, 研究员]
+      exclude_keywords: [夏令营]
+
+  - id: westlake_careers
+    name: 西湖大学人才招聘
+    type: html_list
+    enabled: true
+    category: university
+    organization: 西湖大学
+    url: https://www.westlake.edu.cn/careers/Career_Opportunities/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "li"
+      title: "a"
+      link: "a"
+      date: ""
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [研究, 教授, 博士后, 研究员, 化学, 生物]
+      exclude_keywords: [行政]
+
+  - id: gaoxiaojob_chemistry
+    name: 高校人才网-化学人才
+    type: html_list
+    enabled: true
+    category: aggregator
+    organization: null
+    url: https://www.gaoxiaojob.com/zhaopin/huaxue/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "ul.list li"
+      title: "a"
+      link: "a"
+      date: ".date"
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [化学, 有机化学, 化学生物学, 荧光探针, 药物化学]
+      exclude_keywords: []
+
+  - id: cas_rcjy
+    name: 中科院人才招聘网
+    type: html_list
+    enabled: true
+    category: aggregator
+    organization: null
+    url: https://www.cas.cn/rcjy/
+    request:
+      timeout_seconds: 15
+    selectors:
+      item: "li"
+      title: "a"
+      link: "a"
+      date: ""
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [招聘, 研究, 博士后, 研究员]
+      exclude_keywords: []

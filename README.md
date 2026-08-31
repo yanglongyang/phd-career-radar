@@ -49,6 +49,16 @@ phd-career-radar/
 └── README.md
 ```
 
+## 招聘发现（V0.2 Collector）
+
+- 「招聘发现」页：点击“立即检查招聘更新”→ 逐 source 抓取（source 级状态可见）→ 新材料进入 Inbox；
+- 确定性去重：同 source_job_id / 同 canonical URL（含 utm 清理）/ 同指纹自动去重并更新 last_seen；
+- 疑似重复（同单位+标题高度相似+URL 不同）只标记不合并，由你决定；
+- 关键词过滤（sources.yaml filters）为确定性 pre-filter，命中计数保留在运行摘要；
+- Inbox → “AI 解析” → 现有 Preview → 确认 → 正式 Job（Collector 从不直接创建正式 Job）；
+- 每个 source 独立事务：一个失败不影响其他 source 已落库数据；
+- SSRF 边界复用 Phase 3 组件（仅公网 IP、逐跳校验、大小限制）。
+
 ## 运行方式（两种模式）
 
 ### 日常使用（推荐）：Launcher
@@ -170,6 +180,7 @@ python -m alembic downgrade -1     # 回退一步
 | Phase | 内容 | 状态 |
 | --- | --- | --- |
 | 全部阶段 | **V0.1 完成**：领域模型 / AI 提取 / AI 评估 / 申请 CRM / 风评系统 / 收尾 | ✅ FROZEN |
+| V0.2 | Collector MVP：sources.yaml 驱动（JsonApiCollector + HtmlListCollector）、CollectorRun 审计、DiscoveredJob Inbox、确定性去重（source_job_id/canonical URL/fingerprint）与 possible-duplicate 标记、逐 source 事务隔离、AI Extraction bridge（用户确认后才创建正式 Job） | ✅ 完成（8 个真实公开来源接入，二次运行数据库级去重验证） |
 | 1 | 基础设施：仓库、后端、前端、数据库、迁移、基础 UI | ✅ 完成 |
 | 2 | Job/Organization CRUD、岗位列表/详情、手工导入、去重、版本监控、Dashboard API | ✅ 完成 |
 | 2.1 | Domain Model Hardening：高校领域模型加固（AcademicJobDetails、正交聘用维度）、AI 审计快照（配置哈希 + Evidence 关联）、评分覆盖度 score_coverage、Evidence provenance（独立来源/作用域/转载）、Job/Application 状态拆分、薪资标准化字段 | ✅ 完成 |

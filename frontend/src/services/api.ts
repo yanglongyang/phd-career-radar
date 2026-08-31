@@ -156,3 +156,32 @@ export async function updateSettings(payload: {
 export async function reEvaluateAll() {
   return api<import("../types").ReEvaluateResult>("/jobs/re-evaluate-all", { method: "POST" });
 }
+
+export async function runCollectors() {
+  return api<import("../types").CollectorRun>("/collectors/run", { method: "POST" });
+}
+
+export async function listCollectorRuns(limit = 5) {
+  return api<import("../types").CollectorRun[]>(`/collectors/runs?limit=${limit}`);
+}
+
+export async function listDiscoveredJobs(params: Record<string, unknown> = {}) {
+  return api<import("../types").DiscoveredJobList>(`/discovered-jobs${buildQuery(params)}`);
+}
+
+export async function getDiscoveredJob(id: number) {
+  return api<import("../types").DiscoveredJob>(`/discovered-jobs/${id}`);
+}
+
+export async function patchDiscoveredJob(id: number, payload: { status: string }) {
+  return api<import("../types").DiscoveredJob>(`/discovered-jobs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function extractDiscoveredJob(id: number) {
+  return api<import("../types").ExtractionPreview>(`/discovered-jobs/${id}/extract`, {
+    method: "POST",
+  });
+}

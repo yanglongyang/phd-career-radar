@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import ApplicationsPage from "./pages/ApplicationsPage";
+import DiscoverPage from "./pages/DiscoverPage";
+import DiscoveredDetailPage from "./pages/DiscoveredDetailPage";
 import DashboardPage from "./pages/DashboardPage";
 import JobDetailPage from "./pages/JobDetailPage";
 import JobImportPage from "./pages/JobImportPage";
@@ -25,6 +27,8 @@ export default function App() {
             <Route path="/jobs/new" element={<JobNewPage />} />
             <Route path="/jobs/import" element={<JobImportPage />} />
             <Route path="/jobs/:id" element={<JobDetailPage />} />
+            <Route path="/discovered" element={<DiscoverPage />} />
+            <Route path="/discovered/:id" element={<DiscoveredDetailPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

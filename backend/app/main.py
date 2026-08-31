@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     applications,
+    collectors,
     dashboard,
     evidence,
     jobs,
@@ -51,6 +52,7 @@ app.include_router(applications.router, prefix="/api")
 app.include_router(evidence.router, prefix="/api")
 app.include_router(reputation.router, prefix="/api")
 app.include_router(settings_routes.router, prefix="/api")
+app.include_router(collectors.router, prefix="/api")
 
 
 @app.get("/api/health")
