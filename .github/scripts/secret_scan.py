@@ -4,7 +4,8 @@
 真实密钥永远不应该出现在仓库里 —— .env 与 data/llm_secret.bin 已在 .gitignore。
 
 注意：测试里出现的假密钥（sk-fake-key-...）故意带连字符且长度 < 20，
-不会命中 sk-[A-Za-z0-9]{20,} 模式。
+不会命中 sk-[A-Za-z0-9-]{20,} 模式（V0.2.5 起允许 sk- 后出现连字符，
+以覆盖 sk-proj-... 形态的真实 Key）。
 """
 
 import re
