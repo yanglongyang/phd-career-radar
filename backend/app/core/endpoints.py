@@ -36,6 +36,14 @@ def validate_llm_base_url(url: str) -> str | None:
         return "接口地址不允许包含用户名/密码"
     if parts.fragment:
         return "接口地址不允许包含 #fragment"
+    if parts.query:
+        # normalize 会丢弃 query，而 Provider 用字符串拼接 /chat/completions ——
+        # Base URL 带 query 没有一致的绑定语义，直接拒绝
+        return "接口地址不允许包含查询参数"
+    try:
+        _ = parts.port  # 非法端口（如 :abc）在此抛 ValueError
+    except ValueError:
+        return "接口地址端口不合法"
     return None
 
 

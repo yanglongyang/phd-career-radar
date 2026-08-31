@@ -326,7 +326,12 @@ def _migrate_plaintext_key(log_box=None) -> None:
     """旧工作流遗留：.env 里有明文 LLM_API_KEY → 迁移为 DPAPI 加密存储。
 
     顺序（V0.2.4 安全要求）：先加密写入 + 回读验证成功，才删除 .env 明文行；
-    任何一步失败都保留明文 —— Key 绝不因迁移失败而丢失。"""
+    任何一步失败都保留明文 —— Key 绝不因迁移失败而丢失。
+
+    V0.2.5（P2 closure）：已存在可解密的密钥文件时，必须核对明文与加密载荷
+    是否同一个 Key：一致才允许只删明文；不一致（旧加密文件 A + 新明文 B）
+    则用 B + 当前 base_url 覆盖写入并验证，防止新 Key 被误删。"""
+    from app.core.endpoints import normalize_base_url
     from app.core.secrets import load_secret, save_secret
 
     env_path = _DATA_ROOT / ".env"
@@ -336,11 +341,12 @@ def _migrate_plaintext_key(log_box=None) -> None:
         return
     base = env.get("LLM_BASE_URL", "")
     secret_f = _secret_file()
-    if load_secret(secret_f) is not None:
-        # 已有加密副本 → 只清明文行
+    existing = load_secret(secret_f)
+    if existing is not None and existing.get("api_key") == plain:
+        # 加密副本与明文是同一个 Key → 只删明文行，不动加密文件
         _write_env(env_path, {}, ["LLM_API_KEY"])
         if log_box is not None:
-            log_box.insert(tk.END, "[launcher] 已移除 .env 中的明文密钥（加密副本已存在）\n")
+            log_box.insert(tk.END, "[launcher] 已移除 .env 中的明文密钥（加密副本已存在且一致）\n")
         return
     try:
         save_secret({"api_key": plain, "base_url": base or None}, secret_f)
@@ -349,7 +355,12 @@ def _migrate_plaintext_key(log_box=None) -> None:
             log_box.insert(tk.END, f"[launcher] 密钥迁移失败（明文已保留，未删除）：{e}\n")
         return
     saved = load_secret(secret_f)
-    if saved is None or saved.get("api_key") != plain:
+    if (
+        saved is None
+        or saved.get("api_key") != plain
+        or normalize_base_url(saved.get("base_url") or "")
+        != normalize_base_url(base or "")
+    ):
         if log_box is not None:
             log_box.insert(tk.END, "[launcher] 密钥迁移校验失败（明文已保留，未删除）\n")
         return

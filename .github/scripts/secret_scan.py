@@ -12,7 +12,8 @@ import subprocess
 import sys
 
 PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),      # OpenAI-compatible API key
+    # OpenAI-compatible：sk- 后允许连字符（真实 Key 形如 sk-proj-xxxxx...）
+    re.compile(r"sk-[A-Za-z0-9-]{20,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),          # AWS access key
     re.compile(r"ghp_[A-Za-z0-9]{36}"),       # GitHub personal access token
     re.compile(r"AIza[0-9A-Za-z_-]{35}"),     # Google API key

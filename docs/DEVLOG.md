@@ -1204,3 +1204,36 @@ OpenAI/AWS/GitHub/Google 凭据模式；main 分支开启保护（禁止 force p
 - `main` 分支保护已开启：required status checks（4 job，strict）、
   enforce_admins、禁止 force push、禁止删除分支。
 - 提交签名未启用（需用户配置 GPG/SSH 签名 key 后可选开启 required_signatures）。
+
+## V0.2.5 — 安全审查第二轮（P2 closure + 2 个 P3，2026-08-31）
+
+验收结论：runtime security / credential destination integrity / error leakage /
+CI / branch workflow 全 PASS；剩余 1 个 P2 closure + 2 个 P3，已全部修复。
+
+**P2 closure — 明文迁移的"旧加密文件 + 新明文"误删**：`_migrate_plaintext_key()`
+原先在存在任意可解密的密钥文件时直接删 .env 明文 —— 场景"加密=A、.env=B"
+会删掉 B 保留 A（Key 丢失）。现改为：核对加密载荷与明文是否同一个 Key ——
+一致才只删明文；不一致则用 B + 当前 base_url 覆盖写入并回读验证
+（api_key 与 normalized base_url 双核对），成功才删明文。
+测试覆盖：不一致覆盖（B 保留）、一致只删明文（加密文件不动）、覆盖写入失败
+（明文保留 + 旧文件不动）。
+
+**P3-1 — URL 端口/query 校验**：`validate_llm_base_url` 现在访问 `parts.port`
+（非法端口如 :abc 在保存时即拒绝，而不是等到 normalize 才抛 ValueError）；
+query string 直接拒绝（normalize 丢弃 query 且 Provider 拼接 /chat/completions，
+无一致绑定语义）。
+
+**P3-2 — secret scan 正则**：`sk-[A-Za-z0-9]{20,}` 放过带连字符的真实 Key
+（如 sk-proj-xxx...）→ 改为 `sk-[A-Za-z0-9-]{20,}`；调整了一个测试夹具
+避免误报。README 补充开发模式说明：直接环境变量配置绕过 DPAPI 绑定，
+属开发者显式 override，打包版不走此路。
+
+### 验证
+
+- 测试：pytest **253 passed**（+4：迁移覆盖/一致/写失败、端口/query）；ruff 全绿；
+  secret scan OK（158 文件）。
+- 真实 exe E2E：预置"加密=A + .env=B"→ 启动 → .env 明文删除、
+  解密载荷为 B（A 被覆盖）、绑定地址保留。
+- 合并说明：main 保护开启后 PR 的 push/pull_request 事件一度未触发
+  （GitHub 事件投递异常，workflow_dispatch 正常），CI 已支持手动触发
+  （`gh workflow run ci.yml --ref <branch>`），并以此完成了本轮合并。
