@@ -8,7 +8,9 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 # 名称 -> 默认版本文件名（升级时新增 *_v2.md 并在此切换）
 PROMPT_REGISTRY: dict[str, str] = {
     "job_extraction": "job_extraction_v1",
-    "job_evaluation": "job_evaluation_v1",
+    # v2：明确 reputation 只能使用 eligible Evidence（Phase 6.1.1）；
+    # v1 保持原样以维护历史评估的 prompt_version 审计指向
+    "job_evaluation": "job_evaluation_v2",
     # v2：AI 只输出主题叙述结论，计数改由后端确定性统计填充（Phase 6）
     "reputation_summary": "reputation_summary_v2",
 }

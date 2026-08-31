@@ -121,6 +121,15 @@ def collect_evidence(
         if ev.job_id is not None:
             clues.append((ev, "岗位级证据，不进入单位级风评统计"))
             continue
+        if ev.category == "fact":
+            clues.append(
+                (
+                    ev,
+                    "事实证据不直接进入风评计量；如能支撑具体风评主题，请归入对应主题"
+                    "（assessment_pressure / salary_fulfillment / ...）",
+                )
+            )
+            continue
         if ev.scope_level == "organization":
             eligible.append(ev)
         elif ev.scope_level == "department":

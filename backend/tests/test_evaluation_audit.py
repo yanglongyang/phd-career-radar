@@ -139,7 +139,18 @@ def test_finalize_links_evidence(client, sample_job, db_session):
 
     snapshot = {
         **INPUT_SNAPSHOT,
-        "evidence": [{"id": evidence.id, "claim": evidence.claim, "evidence_level": "A"}],
+        "job": {
+            "title": "青年研究员",
+            "organization": {"id": sample_job["organization"]["id"]},
+        },
+        "evidence": [
+            {
+                "id": evidence.id,
+                "claim": evidence.claim,
+                "evidence_level": "A",
+                "eligible_for_reputation_scoring": False,  # 岗位级事实，非风评
+            }
+        ],
     }
     evaluation = finalize_evaluation(
         db_session,
@@ -180,7 +191,18 @@ def test_finalize_rejects_risk_item_evidence_not_provided(client, sample_job, db
     db_session.commit()
     snapshot = {
         **INPUT_SNAPSHOT,
-        "evidence": [{"id": evidence.id, "claim": evidence.claim, "evidence_level": "A"}],
+        "job": {
+            "title": "青年研究员",
+            "organization": {"id": sample_job["organization"]["id"]},
+        },
+        "evidence": [
+            {
+                "id": evidence.id,
+                "claim": evidence.claim,
+                "evidence_level": "A",
+                "eligible_for_reputation_scoring": False,
+            }
+        ],
     }
     evaluation = finalize_evaluation(
         db_session,
@@ -196,7 +218,11 @@ def test_finalize_rejects_risk_item_evidence_not_provided(client, sample_job, db
 
 def test_finalize_rejects_nonexistent_evidence(client, sample_job, db_session):
     """evidence_ids 引用数据库不存在的证据 → 拒绝保存。"""
-    snapshot = {**INPUT_SNAPSHOT, "evidence": [{"id": 999999, "claim": "幽灵证据"}]}
+    snapshot = {
+        **INPUT_SNAPSHOT,
+        "job": {"title": "青年研究员", "organization": {"id": sample_job["organization"]["id"]}},
+        "evidence": [{"id": 999999, "claim": "幽灵证据", "eligible_for_reputation_scoring": False}],
+    }
     with pytest.raises(ValueError, match="不存在的证据"):
         finalize_evaluation(
             db_session,
@@ -250,7 +276,11 @@ def test_finalize_rejects_out_of_scope_evidence(client, sample_job, db_session):
     db_session.commit()
     snapshot = {
         **INPUT_SNAPSHOT,
-        "evidence": [{"id": foreign.id, "claim": foreign.claim, "evidence_level": "C"}],
+        "job": {"title": "青年研究员", "organization": {"id": sample_job["organization"]["id"]}},
+        "evidence": [
+            {"id": foreign.id, "claim": foreign.claim, "evidence_level": "C",
+             "eligible_for_reputation_scoring": False},
+        ],
     }
     with pytest.raises(ValueError, match="不属于当前岗位"):
         finalize_evaluation(

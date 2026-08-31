@@ -346,31 +346,44 @@ def finalize_evaluation(
     # Region 与 reputation 的最终值由 snapshot 决定，调用方传入的值一律覆盖
     final_scores = dict(dimension_scores)
     final_scores["region"] = (input_snapshot.get("region") or {}).get("score")
-    # Phase 6.1.1 reputation guard：**不信任 snapshot 里的 eligible 布尔值** ——
-    # 直接调用 finalize 的调用方可能伪造该标志。以唯一权威重新计算：
-    # snapshot["job"] 携带 organization 与 department（build_evaluation_context
-    # 自动填充），据此调用 eligible_reputation_evidence_ids() 重验。
+    # Phase 6.1.1 final reputation guard（最终语义）：
+    #
+    # (a) 逐条一致性校验：snapshot 中每条证据的 eligible_for_reputation_scoring
+    #     必须与唯一权威（eligible_reputation_evidence_ids）完全一致 ——
+    #     直接调用 finalize 伪造标志 → 拒绝保存（不是静默 null）。
+    #     快照缺标志（旧数据/异常输入）→ 视为不一致拒绝。
+    # (b) 解锁条件 = **非空交集**：至少有一条模型实际看到的证据属于真正
+    #     eligible 主题才允许 reputation 分 —— 不是"快照全部证据都必须是
+    #     reputation 证据"（岗位事实/参考线索混入会误杀合法风评）。
     evidence_snapshot = input_snapshot.get("evidence") or []
-    if not evidence_snapshot:
-        final_scores["reputation"] = None
-    else:
-        job_snapshot = input_snapshot.get("job") or {}
-        org_snapshot = job_snapshot.get("organization") or {}
-        org_id = org_snapshot.get("id")
-        department = job_snapshot.get("department")
+    job_snapshot = input_snapshot.get("job") or {}
+    org_snapshot = job_snapshot.get("organization") or {}
+    org_id = org_snapshot.get("id")
+    department = job_snapshot.get("department")
+
+    if evidence_snapshot:
         if org_id is None:
-            # 快照没有单位信息（异常输入）→ 无法重验 → 拒绝解锁
+            raise ValueError(
+                "input_snapshot 缺少岗位单位信息，无法重验 reputation eligibility，拒绝保存评估"
+            )
+        authoritative = eligible_reputation_evidence_ids(db, org_id, department)
+        snapshot_ids: set[int] = set()
+        for item in evidence_snapshot:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            evidence_id = item["id"]
+            snapshot_ids.add(evidence_id)
+            expected = evidence_id in authoritative
+            actual = bool(item.get("eligible_for_reputation_scoring", False))
+            if actual != expected:
+                raise ValueError(
+                    f"Evidence #{evidence_id} 的 reputation eligibility 与确定性权威不一致"
+                    f"（snapshot={actual} / authoritative={expected}），拒绝保存评估"
+                )
+        if not (snapshot_ids & authoritative):
             final_scores["reputation"] = None
-        else:
-            snapshot_ids = {
-                item.get("id")
-                for item in evidence_snapshot
-                if isinstance(item, dict) and item.get("id") is not None
-            }
-            authoritative = eligible_reputation_evidence_ids(db, org_id, department)
-            # 只有"快照证据 ⊆ 权威 eligible 集合且非空"才允许 reputation 分
-            if not snapshot_ids or not snapshot_ids.issubset(authoritative):
-                final_scores["reputation"] = None
+    else:
+        final_scores["reputation"] = None
 
     total = compute_total(final_scores)
     coverage = compute_coverage(final_scores)

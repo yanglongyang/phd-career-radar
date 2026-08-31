@@ -139,7 +139,7 @@ def test_provider_success_after_retry(monkeypatch):
     out, version = provider.evaluate_job({"job": {}})
     assert state["n"] == 2
     assert out.risk_level == "medium"
-    assert version == "job_evaluation_v1"
+    assert version == "job_evaluation_v2"
 
 
 def test_get_provider_none_when_not_configured():

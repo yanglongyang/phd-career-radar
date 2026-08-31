@@ -520,17 +520,18 @@ def test_finalize_recomputes_eligibility_ignoring_forged_flag(
         ],
         "hard_filters": {},
     }
-    evaluation = finalize_evaluation(
-        db_session,
-        job_row,
-        ai_output=_make_ai_output_scores({"fit": 80, "reputation": 85}),
-        dimension_scores={"fit": 80, "reputation": 85},
-        input_snapshot=snapshot,
-        evidence_ids=[ev["id"]],
-    )
-    db_session.commit()
-    # 重验后单 C 不可解锁 → 强制 null
-    assert evaluation.reputation_score is None
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="不一致"):
+        finalize_evaluation(
+            db_session,
+            job_row,
+            ai_output=_make_ai_output_scores({"fit": 80, "reputation": 85}),
+            dimension_scores={"fit": 80, "reputation": 85},
+            input_snapshot=snapshot,
+            evidence_ids=[ev["id"]],
+        )
+    # 伪造标志直接拒绝保存，而不是静默 null（保留防绕过）
 
 
 def test_repost_error_maps_to_422(client, sample_job_with_evidence):
@@ -542,3 +543,76 @@ def test_repost_error_maps_to_422(client, sample_job_with_evidence):
     )
     assert resp.status_code == 422
     assert "转载目标不存在" in resp.text
+
+
+# ---------- Phase 6.1.1 final closure ----------
+
+def test_eligible_reputation_with_job_fact_still_allowed(
+    client, sample_job_with_evidence, db_session
+):
+    """B+C eligible 风评 + A 级岗位事实 → reputation 仍保留（非空交集 gate）。"""
+    job, org_id = sample_job_with_evidence
+    _evidence(client, org_id, independence_key="src_b", evidence_level="B")
+    _evidence(client, org_id, independence_key="src_c")
+    _job_evidence(client, job["id"], claim="公告写明聘期六年")  # ineligible 岗位事实
+
+    provider = _Provider(
+        evaluation_output={
+            "summary": "", "scores": {"fit": 80, "reputation": 70},
+            "risk_level": "low", "confidence": "high",
+        }
+    )
+    evaluation = evaluate_job(db_session, db_session.get(Job, job["id"]), provider)
+    db_session.commit()
+    ctx_evidence = provider.seen_contexts[0]["evidence"]
+    # 岗位事实也在 context（eligible=false），但 eligible 风评存在 → 交集非空
+    assert any(e["eligible_for_reputation_scoring"] is False for e in ctx_evidence)
+    assert any(e["eligible_for_reputation_scoring"] is True for e in ctx_evidence)
+    assert evaluation.reputation_score == 70
+
+
+def test_eligible_reputation_with_unknown_clue_still_allowed(
+    client, sample_job_with_evidence, db_session
+):
+    """B+C eligible 风评 + unknown/ineligible 线索 → reputation 仍保留。"""
+    job, org_id = sample_job_with_evidence
+    _evidence(client, org_id, independence_key="src_b", evidence_level="B")
+    _evidence(client, org_id, independence_key="src_c")
+    _evidence(client, org_id, claim="未知来源说法", scope_level="unknown",
+              independence_key="unknown_clue")
+
+    provider = _Provider(
+        evaluation_output={
+            "summary": "", "scores": {"fit": 80, "reputation": 68},
+            "risk_level": "low", "confidence": "high",
+        }
+    )
+    evaluation = evaluate_job(db_session, db_session.get(Job, job["id"]), provider)
+    db_session.commit()
+    assert evaluation.reputation_score == 68
+
+
+def test_org_facts_do_not_form_eligible_reputation_topic(
+    client, sample_job_with_evidence, db_session
+):
+    """2 条 A 级组织级 fact → 不形成 eligible reputation 主题 → reputation=null。"""
+    job, org_id = sample_job_with_evidence
+    _evidence(client, org_id, claim="官方文件甲", category="fact",
+              evidence_level="A", independence_key="fact1")
+    _evidence(client, org_id, claim="官方文件乙", category="fact",
+              evidence_level="A", independence_key="fact2")
+
+    report = client.get(f"/api/organizations/{org_id}/reputation").json()
+    # fact 不进入主题统计（成为线索），不存在 eligible 主题
+    assert report["topics"] == []
+    assert any("事实证据不直接进入风评计量" in c["reason"] for c in report["clues"])
+
+    provider = _Provider(
+        evaluation_output={
+            "summary": "", "scores": {"fit": 80, "reputation": 75},
+            "risk_level": "medium", "confidence": "medium",
+        }
+    )
+    evaluation = evaluate_job(db_session, db_session.get(Job, job["id"]), provider)
+    db_session.commit()
+    assert evaluation.reputation_score is None

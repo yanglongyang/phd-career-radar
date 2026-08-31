@@ -654,3 +654,42 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 
 - **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
   申请历史时间线、applied_at 显式编辑。
+
+---
+
+## Phase 6.1.1 Final Closure（2026-08-31 完成）
+
+第十一轮审查：修复 `issubset` gate 误杀合法混合证据的回归，同时保留伪造 flag 防绕过；
+补 prompt v2 与 fact 排除。无 migration。
+
+1. **finalize reputation gate 最终语义**：
+   - **逐条一致性校验**：snapshot 中每条证据的 `eligible_for_reputation_scoring` 必须与
+     唯一权威完全一致，不一致 → 直接 `ValueError` 拒绝保存（伪造 flag 不再静默 null，
+     直接调用 finalize 也无法绕过）；快照缺单位信息 → 拒绝；
+   - **解锁条件 = 非空交集**：`snapshot_ids & authoritative` 非空才允许 reputation 分——
+     不再要求"快照全部证据都必须是 reputation 证据"。岗位事实/参考线索混入 context
+     不会误杀合法风评。
+   - 测试三件套：B+C eligible + A 岗位事实 → reputation 保留；B+C eligible +
+     unknown 线索 → 保留；伪造 eligible=true 单 C → 拒绝（ValueError）。
+2. **job_evaluation_v2**：新增契约"reputation 只能使用 `eligible_for_reputation_scoring=true`
+   的 Evidence；false 证据可作为其他维度/风险/信息缺口参考，不得影响 reputation 分；
+   不存在 true 证据时 reputation 必须为 null"。**v1 保持原样**（历史评估的
+   prompt_version 审计指向不被破坏），registry 切到 v2。
+3. **category=fact 排除出风评聚合**：fact 证据一律降为线索（"事实证据不直接进入风评
+   计量；如能支撑具体风评主题，请归入对应主题"）——2 条 A 级组织级事实不再能形成
+   "other" eligible 主题解锁风评分（与"岗位事实不解锁 reputation"边界统一）。
+   测试：2 条 A fact → topics 为空、线索提示、reputation=null。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**161 passed**（新增 3 个 final closure 测试；forged 测试改为拒绝语义；
+  快照契约测试更新）；vitest：17 passed；ruff：All checks passed；前端 build：通过。
+
+### 明确未实现
+
+- **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
+  申请历史时间线、applied_at 显式编辑。
