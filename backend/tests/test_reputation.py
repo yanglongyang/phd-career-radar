@@ -29,6 +29,18 @@ def _evidence(client, org_id, **kwargs):
     return resp.json()
 
 
+def _make_ai_output_scores(scores: dict):
+    """构造 AI 评估输出（scores 自定义）。"""
+    return AIEvalOut.model_validate(
+        {
+            "summary": "",
+            "scores": scores,
+            "risk_level": "medium",
+            "confidence": "medium",
+        }
+    )
+
+
 def _job_evidence(client, job_id, **kwargs):
     base = {"claim": "岗位级证据", "category": "fact",
             "evidence_level": "A", "source_type": "official", "stance": "neutral",
@@ -151,12 +163,16 @@ def test_repost_chain_validation(client, sample_job_with_evidence, db_session):
         validate_repost_chain(db_session, evidence_id=None, repost_of=root_id,
                               organization_id=other_org)
 
-    # 合法转载后形成循环：root → b → c，再把 root 的转载指向 c 构成环
+    # 合法转载后形成循环：root → b → c，再把 root 的转载指向 c 构成环 → HTTP 422
     b = _evidence(client, org_id, repost_of_evidence_id=root_id)
     c = _evidence(client, org_id, repost_of_evidence_id=b["id"])
-    with pytest.raises(RepostChainError):
-        client.patch(f"/api/evidence/{root_id}", json={"repost_of_evidence_id": c["id"]})
-    assert client.get(f"/api/evidence?organization_id={org_id}").json() is not None
+    resp = client.patch(f"/api/evidence/{root_id}", json={"repost_of_evidence_id": c["id"]})
+    assert resp.status_code == 422
+    assert "循环" in resp.text or "自身" in resp.text
+    # root 的转载未被修改
+    listed = client.get(f"/api/evidence?organization_id={org_id}").json()
+    root_row = next(e for e in listed if e["id"] == root_id)
+    assert root_row["repost_of_evidence_id"] is None
 
 
 # ---------- 确定性风评统计 ----------
@@ -440,3 +456,89 @@ def test_delete_used_evidence_rejected(client, sample_job_with_evidence, db_sess
 
     # 未参与评估的证据可删除
     assert client.delete(f"/api/evidence/{unused['id']}").status_code == 204
+
+
+# ---------- Phase 6.1.1 最终不变量 ----------
+
+def test_repost_with_own_key_follows_parent(client, sample_job_with_evidence, db_session):
+    """不变量 2：转载即使自己填了 independence_key，也优先跟随 parent 的 canonical 源。"""
+    from app.services.reputation import canonical_source_keys
+
+    _, org_id = sample_job_with_evidence
+    root = _evidence(client, org_id, independence_key="root_key")
+    repost = _evidence(client, org_id, repost_of_evidence_id=root["id"],
+                       independence_key="repost_own_key")  # 转载自己声称新 key
+
+    db_session.commit()
+    canonical = canonical_source_keys(db_session, org_id)
+    # 转载跟随 root，不因自己的 key 变成新独立源
+    assert canonical[repost["id"]] == canonical[root["id"]] == "root_key"
+    assert canonical[repost["id"]] != "repost_own_key"
+
+
+def test_delete_root_with_repost_children_rejected(client, sample_job_with_evidence):
+    """不变量 3：仍被转载引用的 root 禁止删除（409），children 不会退化为独立来源。"""
+    _, org_id = sample_job_with_evidence
+    root = _evidence(client, org_id, independence_key="root_key")
+    _evidence(client, org_id, repost_of_evidence_id=root["id"])
+
+    resp = client.delete(f"/api/evidence/{root['id']}")
+    assert resp.status_code == 409
+    assert "转载引用" in resp.text
+    # 未被删除：列表里仍在
+    listed = client.get(f"/api/evidence?organization_id={org_id}").json()
+    assert any(e["id"] == root["id"] for e in listed)
+
+
+def test_finalize_recomputes_eligibility_ignoring_forged_flag(
+    client, sample_job_with_evidence, db_session
+):
+    """不变量 1：直接调用 finalize 的人伪造 eligible=true 也无效 ——
+    单 C 证据重验后仍不可解锁 reputation（绕过编排层也不行）。"""
+    from app.services.evaluation import finalize_evaluation
+
+    job, org_id = sample_job_with_evidence
+    ev = _evidence(client, org_id, independence_key="single_c")
+    db_session.commit()
+
+    job_row = db_session.get(Job, job["id"])
+    snapshot = {
+        "profile": {"hard_filters": {}},
+        "job": {
+            "title": job["title"],
+            "organization": {"id": org_id, "name": "Phase61大学"},
+            "department": job["department"],
+        },
+        "region": {"tier": "unrated", "score": None},
+        "evidence": [
+            {
+                "id": ev["id"],
+                "claim": ev["claim"],
+                "evidence_level": "C",
+                "eligible_for_reputation_scoring": True,  # 伪造标志
+            }
+        ],
+        "hard_filters": {},
+    }
+    evaluation = finalize_evaluation(
+        db_session,
+        job_row,
+        ai_output=_make_ai_output_scores({"fit": 80, "reputation": 85}),
+        dimension_scores={"fit": 80, "reputation": 85},
+        input_snapshot=snapshot,
+        evidence_ids=[ev["id"]],
+    )
+    db_session.commit()
+    # 重验后单 C 不可解锁 → 强制 null
+    assert evaluation.reputation_score is None
+
+
+def test_repost_error_maps_to_422(client, sample_job_with_evidence):
+    """不变量 4：非法转载（目标不存在）→ HTTP 422。"""
+    _, org_id = sample_job_with_evidence
+    resp = client.post(
+        f"/api/evidence/organizations/{org_id}",
+        json={"claim": "x", "repost_of_evidence_id": 999999},
+    )
+    assert resp.status_code == 422
+    assert "转载目标不存在" in resp.text

@@ -346,17 +346,31 @@ def finalize_evaluation(
     # Region 与 reputation 的最终值由 snapshot 决定，调用方传入的值一律覆盖
     final_scores = dict(dimension_scores)
     final_scores["region"] = (input_snapshot.get("region") or {}).get("score")
-    # Phase 6.1 reputation guard：没有任何"够格支撑评分"的证据时，
-    # reputation 强制为 null。新快照缺少标志按 False（保守：不默认解锁）；
-    # 仅 Phase 6 之前的历史快照（无任何标志）显式兼容由读取路径处理，不经过本函数。
+    # Phase 6.1.1 reputation guard：**不信任 snapshot 里的 eligible 布尔值** ——
+    # 直接调用 finalize 的调用方可能伪造该标志。以唯一权威重新计算：
+    # snapshot["job"] 携带 organization 与 department（build_evaluation_context
+    # 自动填充），据此调用 eligible_reputation_evidence_ids() 重验。
     evidence_snapshot = input_snapshot.get("evidence") or []
-    reputation_eligible = any(
-        bool(item.get("eligible_for_reputation_scoring", False))
-        for item in evidence_snapshot
-        if isinstance(item, dict)
-    )
-    if not reputation_eligible:
+    if not evidence_snapshot:
         final_scores["reputation"] = None
+    else:
+        job_snapshot = input_snapshot.get("job") or {}
+        org_snapshot = job_snapshot.get("organization") or {}
+        org_id = org_snapshot.get("id")
+        department = job_snapshot.get("department")
+        if org_id is None:
+            # 快照没有单位信息（异常输入）→ 无法重验 → 拒绝解锁
+            final_scores["reputation"] = None
+        else:
+            snapshot_ids = {
+                item.get("id")
+                for item in evidence_snapshot
+                if isinstance(item, dict) and item.get("id") is not None
+            }
+            authoritative = eligible_reputation_evidence_ids(db, org_id, department)
+            # 只有"快照证据 ⊆ 权威 eligible 集合且非空"才允许 reputation 分
+            if not snapshot_ids or not snapshot_ids.issubset(authoritative):
+                final_scores["reputation"] = None
 
     total = compute_total(final_scores)
     coverage = compute_coverage(final_scores)

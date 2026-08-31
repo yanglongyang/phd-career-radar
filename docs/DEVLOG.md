@@ -615,3 +615,42 @@ UTC 17:00（本地已是次日 01:00）错显示成当天。
 
 - **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
   申请历史时间线、applied_at 显式编辑。
+
+---
+
+## Phase 6.1.1 — Final Evidence Invariants（2026-08-31 完成）
+
+第十轮审查指出的最后四个 invariant，全部封死后 **Evidence & Reputation 可冻结**。无 migration。
+
+1. **finalize 重验 eligibility（不变量 1）**：`finalize_evaluation()` 不再信任 snapshot 里的
+   `eligible_for_reputation_scoring` 布尔值——改为从 snapshot 携带的 job.organization.id +
+   department 调用唯一权威 `eligible_reputation_evidence_ids()` 重新计算，要求
+   "快照证据 ⊆ 权威 eligible 集合且非空"才允许 reputation 分。**直接调用 finalize 的调用方
+   伪造 eligible=true 也无效**（测试：单 C 证据 + 伪造标志 → 落库 null）。快照无单位信息时
+   保守拒绝解锁。
+2. **repost 优先追 parent（不变量 2）**：canonical resolver 改为"先沿 repost 链追根，
+   只有非转载才使用自己的 independence_key"——转载自己填新 key 不再被算成新独立源
+   （测试：repost 带 repost_own_key → canonical 仍 = root_key）。
+3. **被转载引用的 root 禁止删除（不变量 3）**：DELETE 增加
+   `repost_of_evidence_id == 当前 id` 的引用检查 → 409"删除会使转载退化为独立来源，
+   改变风评统计"（测试：root 有 child 时 409 且 root 仍在）。
+4. **RepostChainError → HTTP 422（不变量 4）**：POST/PATCH 路由 catch
+   `RepostChainError` 转为 HTTPException(422)（测试：目标不存在 → 422"转载目标不存在"；
+   循环 → 422 且 root 未被修改）。此前契约只存在于文档。
+
+另：Evidence 删除确认文案更新——不再说"历史评估关联会一并清理"，改为说明
+"已用于历史评估或仍被转载引用的证据会被拒绝删除（409），审计链与统计不会因此改变"。
+
+### 数据库变化
+
+- 无。
+
+### 测试 / lint / build
+
+- pytest：**158 passed**（新增 4 个不变量测试 + 2 个既有测试按 422 契约更新）
+- vitest：17 passed；ruff：All checks passed；前端 build：通过
+
+### 明确未实现
+
+- **Phase 7**：设置页可视化、批量重评、Collector 架构、Evidence selection/ranking、
+  申请历史时间线、applied_at 显式编辑。

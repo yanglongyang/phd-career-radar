@@ -76,21 +76,23 @@ def _org_evidence(db: Session, organization_id: int) -> list[Evidence]:
 
 def canonical_source_keys(db: Session, organization_id: int) -> dict[int, str]:
     """每条证据的 canonical 来源键 —— 基于该单位**全量**证据做数据库级追根，
-    与统计时的主题子集无关（Phase 6.1 P0-4：否则"原帖不在当前主题"的转载链
-    会被误拆成多个独立来源，可能把 1 个真实来源推过 eligibility 门槛）。
+    与统计时的主题子集无关（Phase 6.1 P0-4）。
 
-    规则：有 independence_key → 用 key；否则沿 repost 链找到 root →
-    `evidence_<root.id>`。链上循环或断链时，涉及证据各自独立成源（保守降级，
-    不合并）。"""
+    优先级（Phase 6.1.1 不变量 2）：**repost 优先追 parent** —— 转载只要声明了
+    repost_of_evidence_id，就跟随 parent 的 canonical 源；只有**非转载**证据
+    才使用自己的 independence_key。否则转载自己填一个新 key 就会被重新算成
+    独立来源，绕过"转载跟随源头、不单独计数"的核心承诺。
+
+    链上循环或断链时，涉及证据各自独立成源（保守降级，不合并）。"""
     rows = _org_evidence(db, organization_id)
     by_id = {ev.id: ev for ev in rows}
 
     def resolve(ev: Evidence, seen: frozenset[int]) -> str:
-        if ev.independence_key:
-            return ev.independence_key
         parent_id = ev.repost_of_evidence_id
         if parent_id and parent_id not in seen and parent_id in by_id:
             return resolve(by_id[parent_id], seen | {ev.id})
+        if ev.independence_key:
+            return ev.independence_key
         return f"evidence_{ev.id}"
 
     keys: dict[int, str] = {}

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import EvaluationEvidence, Evidence, Job, Organization
 from app.schemas.evidence import EvidenceCreate, EvidenceOut, EvidenceUpdate
-from app.services.evidence import validate_repost_chain
+from app.services.evidence import RepostChainError, validate_repost_chain
 
 router = APIRouter(prefix="/evidence", tags=["evidence"])
 
@@ -46,8 +46,11 @@ def create_job_evidence(job_id: int, payload: EvidenceCreate, db: Session = Depe
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"岗位不存在: {job_id}")
-    validate_repost_chain(db, evidence_id=None, repost_of=payload.repost_of_evidence_id,
-                          organization_id=job.organization_id)
+    try:
+        validate_repost_chain(db, evidence_id=None, repost_of=payload.repost_of_evidence_id,
+                              organization_id=job.organization_id)
+    except RepostChainError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     row = Evidence(job_id=job_id, organization_id=job.organization_id,
                    **payload.model_dump(exclude={"organization_id"}))
     db.add(row)
@@ -61,8 +64,11 @@ def create_organization_evidence(org_id: int, payload: EvidenceCreate, db: Sessi
     """组织级风评证据（长期资产，不随岗位删除）。"""
     if db.get(Organization, org_id) is None:
         raise HTTPException(status_code=404, detail=f"单位不存在: {org_id}")
-    validate_repost_chain(db, evidence_id=None, repost_of=payload.repost_of_evidence_id,
-                          organization_id=org_id)
+    try:
+        validate_repost_chain(db, evidence_id=None, repost_of=payload.repost_of_evidence_id,
+                              organization_id=org_id)
+    except RepostChainError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     row = Evidence(organization_id=org_id, **payload.model_dump(exclude={"organization_id"}))
     db.add(row)
     db.commit()
@@ -75,8 +81,11 @@ def update_evidence(evidence_id: int, payload: EvidenceUpdate, db: Session = Dep
     """部分更新：省略字段 = 不修改。历史评估的 Evidence 审计展示来自
     input_snapshot 快照，因此这里的编辑不会漂移历史评估的审计记录。"""
     row = _get_or_404(db, evidence_id)
-    validate_repost_chain(db, evidence_id=row.id, repost_of=payload.repost_of_evidence_id,
-                          organization_id=row.organization_id)
+    try:
+        validate_repost_chain(db, evidence_id=row.id, repost_of=payload.repost_of_evidence_id,
+                              organization_id=row.organization_id)
+    except RepostChainError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     for field, value in payload.model_dump(exclude_unset=True, exclude={"organization_id"}).items():
         setattr(row, field, value)
     db.commit()
@@ -99,6 +108,16 @@ def delete_evidence(evidence_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=409,
             detail="该证据已用于历史评估，不能删除：评估审计链（input_snapshot 与关联记录）必须保留",
+        )
+    # Phase 6.1.1 不变量 3：仍有转载引用该证据时禁止删除 —— 删除 root 会让
+    # children 退化为多个独立来源，可能改变 eligibility
+    children = db.scalars(
+        select(Evidence.id).where(Evidence.repost_of_evidence_id == evidence_id)
+    ).first()
+    if children is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="该证据仍被其他证据转载引用，不能删除：删除会使转载退化为独立来源，改变风评统计",
         )
     db.delete(row)
     db.commit()

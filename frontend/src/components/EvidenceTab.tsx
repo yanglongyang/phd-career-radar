@@ -208,7 +208,7 @@ export default function EvidenceTab({
                 title="岗位级证据"
                 rows={jobRowsList}
                 onDelete={(id) => {
-                  if (window.confirm("删除这条证据？其与历史评估的关联会一并清理。")) {
+                  if (window.confirm("删除这条证据？已用于历史评估或仍被转载引用的证据会被拒绝删除（409），审计链与统计不会因此改变。")) {
                     removeMutation.mutate(id);
                   }
                 }}
@@ -221,7 +221,7 @@ export default function EvidenceTab({
                   rows={orgLevelRows}
                   orgLoading={orgLoading}
                   onDelete={(id) => {
-                    if (window.confirm("删除这条证据？其与历史评估的关联会一并清理。")) {
+                    if (window.confirm("删除这条证据？已用于历史评估或仍被转载引用的证据会被拒绝删除（409），审计链与统计不会因此改变。")) {
                       removeMutation.mutate(id);
                     }
                   }}
