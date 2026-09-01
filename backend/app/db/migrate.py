@@ -13,6 +13,18 @@ from __future__ import annotations
 
 from sqlalchemy import inspect, text
 
+# V0.3.1 一次性数据修正快照：V0.3 迁移把历史行统一回填为 other，
+# 这里按"发现时的来源"把已知高校来源的旧记录修正为 university。
+# 与迁移 0e4b2c9d31a8 的映射保持一致；硬编码，不读取 sources.yaml ——
+# 未来修改配置不回溯历史语义（sector 在发现时冻结）。
+LEGACY_SECTOR_BACKFILL: dict[str, str] = {
+    "sjtu_postdoc": "university",
+    "sjtu_research": "university",
+    "hust_faculty": "university",
+    "pku_rczp": "university",
+    "fudan_hr": "university",
+}
+
 
 def ensure_missing_columns(engine, metadata=None) -> list[str]:
     """为已有表补齐模型声明但数据库中缺失的普通列。返回新增列名列表。
@@ -61,3 +73,25 @@ def ensure_missing_columns(engine, metadata=None) -> list[str]:
                     ))
                 added.append(f"{table.name}.{col.name}")
     return added
+
+
+def backfill_legacy_sectors(engine) -> int:
+    """一次性数据修正（桌面升级路径，幂等）：V0.3 迁移把历史行回填为 other，
+    这里按发现时的来源把已知高校来源的旧记录修正为 university。
+
+    只更新 sector='other' 的行（不覆盖任何已有值）；映射硬编码快照，
+    不读取 sources.yaml。返回更新的行数。"""
+    if "discovered_jobs" not in inspect(engine).get_table_names():
+        return 0
+    updated = 0
+    with engine.begin() as conn:
+        for source_id, sector in LEGACY_SECTOR_BACKFILL.items():
+            result = conn.execute(
+                text(
+                    "UPDATE discovered_jobs SET sector=:s "
+                    "WHERE sector='other' AND source_id=:id"
+                ),
+                {"s": sector, "id": source_id},
+            )
+            updated += result.rowcount or 0
+    return updated

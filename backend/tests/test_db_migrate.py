@@ -138,3 +138,96 @@ def test_ensure_missing_columns_supports_indexed_columns(tmp_path):
         indexes = [str(i[1]) for i in conn.execute(text("PRAGMA index_list(t)"))]
         assert any("sector" in name for name in indexes)
     assert ensure_missing_columns(engine, metadata=Base2.metadata) == []  # 幂等
+"""V0.3.1 追加测试：legacy 高校来源 sector 一次性回填。"""
+
+
+def _upgrade_to2(cfg, revision: str) -> None:
+    from alembic import command
+
+    command.upgrade(cfg, revision)
+
+
+def test_migration_v031_backfills_known_university_sources(tmp_path, monkeypatch):
+    """已知高校来源的旧记录（sector=other）→ upgrade head → university；
+    未知来源保持 other；已非 other 的值不被覆盖。"""
+    import sqlite3
+
+    from alembic.config import Config
+
+    from app.core import config as config_mod
+
+    db_path = tmp_path / "mig_v031.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    config_mod.get_settings.cache_clear()
+    try:
+        cfg = Config(str(config_mod.PROJECT_ROOT / "backend" / "alembic.ini"))
+        cfg.set_main_option(
+            "script_location", str(config_mod.PROJECT_ROOT / "backend" / "alembic")
+        )
+        _upgrade_to2(cfg, "9834a5845c71")  # V0.3（含 sector 列）
+        conn = sqlite3.connect(db_path)
+        for sid, sector in (
+            ("sjtu_postdoc", "other"),   # 已知高校来源，V0.3 回填为 other
+            ("hust_faculty", "other"),
+            ("unknown_source", "other"), # 未知来源，保持 other
+            ("sjtu_research", "state_owned"),  # 已有非 other 值，不覆盖
+        ):
+            conn.execute(
+                "INSERT INTO discovered_jobs (source_id, source_name, source_url,"
+                " status, sector, discovered_at, last_seen_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (sid, sid, f"https://x/{sid}", "new", sector,
+                 "2026-01-01 00:00:00", "2026-01-01 00:00:00"),
+            )
+        conn.commit()
+        conn.close()
+        _upgrade_to2(cfg, "head")
+        conn = sqlite3.connect(db_path)
+        rows = dict(conn.execute("SELECT source_id, sector FROM discovered_jobs"))
+        conn.close()
+        assert rows["sjtu_postdoc"] == "university"     # 已修正
+        assert rows["hust_faculty"] == "university"
+        assert rows["unknown_source"] == "other"        # 未知来源不动
+        assert rows["sjtu_research"] == "state_owned"   # 非 other 不覆盖
+    finally:
+        config_mod.get_settings.cache_clear()
+
+
+def test_backfill_legacy_sectors_function(tmp_path):
+    """桌面启动路径：backfill_legacy_sectors 幂等且只动 sector='other' 的已知源。"""
+    import sqlite3
+
+    from sqlalchemy import create_engine
+
+    from app.db.migrate import backfill_legacy_sectors
+
+    db_path = tmp_path / "bf.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE discovered_jobs (id INTEGER PRIMARY KEY, source_id TEXT,"
+            " source_url TEXT, status TEXT, sector TEXT DEFAULT 'other')"
+        )
+    conn = sqlite3.connect(db_path)
+    for sid in ("sjtu_postdoc", "pku_rczp", "unknown_x"):
+        conn.execute(
+            "INSERT INTO discovered_jobs (source_id, source_url, status, sector)"
+            " VALUES (?, 'https://x', 'new', 'other')", (sid,)
+        )
+    conn.execute(
+        "INSERT INTO discovered_jobs (source_id, source_url, status, sector)"
+        " VALUES ('sjtu_research', 'https://x', 'new', 'mixed')"
+    )
+    conn.commit()
+    conn.close()
+
+    assert backfill_legacy_sectors(engine) == 2
+    conn = sqlite3.connect(db_path)
+    rows = dict(conn.execute("SELECT source_id, sector FROM discovered_jobs"))
+    conn.close()
+    assert rows["sjtu_postdoc"] == "university"
+    assert rows["pku_rczp"] == "university"
+    assert rows["unknown_x"] == "other"        # 未知来源保持
+    assert rows["sjtu_research"] == "mixed"    # 非 other 不覆盖
+
+    assert backfill_legacy_sectors(engine) == 0  # 幂等
