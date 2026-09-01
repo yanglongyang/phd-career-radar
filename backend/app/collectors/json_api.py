@@ -36,9 +36,7 @@ class JsonApiCollector(JobCollector):
     def __init__(self, source: SourceConfig):
         self.source = source
         self._fetcher = SafeFetcher(
-            user_agent=source.request.user_agent,
-            max_bytes=source.request.max_bytes,
-            verify_ssl=source.request.verify_ssl,
+            user_agent=source.request.user_agent, max_bytes=source.request.max_bytes
         )
 
     @staticmethod

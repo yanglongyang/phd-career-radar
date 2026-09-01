@@ -41,28 +41,16 @@ def assert_public_host(host: str) -> None:
 
 
 class SafeFetcher:
-    """带 SSRF 边界与大小限制的 HTTP 抓取器（不跟随重定向，逐跳校验）。
+    """带 SSRF 边界与大小限制的 HTTP 抓取器（不跟随重定向，逐跳校验）。"""
 
-    verify_ssl=False 仅用于个别证书异常的政府/院所站点（如 ic.cas.cn），
-    由 sources.yaml 逐源显式开启；SSRF 边界与大小限制不受影响。"""
-
-    def __init__(
-        self,
-        user_agent: str = USER_AGENT_DEFAULT,
-        max_bytes: int = MAX_BODY_BYTES,
-        verify_ssl: bool = True,
-    ):
+    def __init__(self, user_agent: str = USER_AGENT_DEFAULT, max_bytes: int = MAX_BODY_BYTES):
         self.user_agent = user_agent
         self.max_bytes = max_bytes
-        self.verify_ssl = verify_ssl
 
     def _once(self, url: str, timeout: float) -> tuple[int, str, str, str, bytes]:
         headers = {"User-Agent": self.user_agent, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
         try:
-            with httpx.Client(
-                follow_redirects=False, timeout=timeout, headers=headers,
-                verify=self.verify_ssl,
-            ) as client:
+            with httpx.Client(follow_redirects=False, timeout=timeout, headers=headers) as client:
                 with client.stream("GET", url) as resp:
                     status = resp.status_code
                     content_type = resp.headers.get("content-type", "")

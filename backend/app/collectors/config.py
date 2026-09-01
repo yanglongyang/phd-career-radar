@@ -78,7 +78,6 @@ class RequestConfig:
     timeout_seconds: float = 15.0
     user_agent: str = "phd-career-radar/0.2 (+personal job discovery tool)"
     max_bytes: int = 5 * 1024 * 1024
-    verify_ssl: bool = True  # 仅个别证书异常的院所站点显式关闭（如 ic.cas.cn）
 
 
 @dataclass
@@ -133,9 +132,6 @@ def parse_source(raw: dict) -> SourceConfig:
     timeout = request_raw.get("timeout_seconds", 15.0)
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
         raise SourceConfigError(f"[{source_id}] request.timeout_seconds 必须是正数")
-    verify_ssl = request_raw.get("verify_ssl", True)
-    if not isinstance(verify_ssl, bool):
-        raise SourceConfigError(f"[{source_id}] request.verify_ssl 必须是 true/false")
 
     filters = raw.get("filters") or {}
     if not isinstance(filters, dict):
@@ -176,7 +172,6 @@ def parse_source(raw: dict) -> SourceConfig:
         request=RequestConfig(
             timeout_seconds=float(timeout),
             user_agent=str(request_raw.get("user_agent", "phd-career-radar/0.2")),
-            verify_ssl=verify_ssl,
         ),
         filters=filters,
         selectors=raw.get("selectors") or {},
