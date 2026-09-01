@@ -56,6 +56,7 @@ def run_collectors(
             run_id=run.id,
             source_id=err.get("source_id", "?"),
             source_name=err.get("name", err.get("source_id", "?")),
+            sector=err.get("sector", "other"),
             started_at=_now(),
             finished_at=_now(),
             status="failed",
@@ -70,6 +71,7 @@ def run_collectors(
             run_id=run.id,
             source_id=source.id,
             source_name=source.name,
+            sector=source.sector,
             started_at=_now(),
             status="running",
         )
@@ -205,6 +207,9 @@ def _persist_source(
         discovered = DiscoveredJob(
             source_id=source.id,
             source_name=source.name,
+            # V0.3：来源/单位性质在发现时冻结 —— raw.sector_hint（mixed 源逐条确定时）
+            # 优先，否则取 source.sector；之后修改 sources.yaml 不回溯历史语义。
+            sector=raw.sector_hint or source.sector,
             source_job_id=raw.source_job_id,
             source_url=raw.source_url,
             canonical_url=c_url,

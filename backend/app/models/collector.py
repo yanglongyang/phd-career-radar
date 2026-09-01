@@ -53,6 +53,7 @@ class CollectorRunItem(Base):
 
     source_id: Mapped[str] = mapped_column(String(64))
     source_name: Mapped[str] = mapped_column(String(128))
+    sector: Mapped[str] = mapped_column(String(24), default="other")  # V0.3：来源组别
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -87,6 +88,9 @@ class DiscoveredJob(Base):
 
     source_id: Mapped[str] = mapped_column(String(64), index=True)
     source_name: Mapped[str] = mapped_column(String(128))
+    # V0.3：来源/单位性质分类（university/state_owned/enterprise/mixed/other）。
+    # 发现时冻结 —— 之后修改 sources.yaml 不回溯历史记录语义。
+    sector: Mapped[str] = mapped_column(String(24), default="other", index=True)
     source_job_id: Mapped[str | None] = mapped_column(String(128))
     source_url: Mapped[str] = mapped_column(String(1024))
 

@@ -40,6 +40,7 @@ export interface JobQueryParams {
   province?: string;
   city?: string;
   organization_id?: number;
+  organization_type?: string;
   recommendation?: string;
   risk_level?: string;
   confidence?: string;
@@ -163,6 +164,10 @@ export async function runCollectors() {
 
 export async function listCollectorRuns(limit = 5) {
   return api<import("../types").CollectorRun[]>(`/collectors/runs?limit=${limit}`);
+}
+
+export async function listCollectorSources() {
+  return api<import("../types").CollectorSourcesResponse>("/collectors/sources");
 }
 
 export async function listDiscoveredJobs(params: Record<string, unknown> = {}) {

@@ -400,6 +400,7 @@ export interface CollectorRunItem {
   id: number;
   source_id: string;
   source_name: string;
+  sector: string;
   status: string;
   started_at: string;
   finished_at: string | null;
@@ -434,6 +435,7 @@ export interface DiscoveredJob {
   id: number;
   source_id: string;
   source_name: string;
+  sector: string;
   source_job_id: string | null;
   source_url: string;
   canonical_url: string | null;
@@ -451,6 +453,22 @@ export interface DiscoveredJob {
   duplicate_reason: string | null;
   imported_job_id: number | null;
   raw_payload: unknown;
+}
+
+export interface CollectorSource {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  sector: string;
+  category: string;
+  organization: string | null;
+  url: string;
+}
+
+export interface CollectorSourcesResponse {
+  sources: CollectorSource[];
+  config_errors: { source_id: string; name: string; sector?: string; error: string }[];
 }
 
 export interface DiscoveredJobList {

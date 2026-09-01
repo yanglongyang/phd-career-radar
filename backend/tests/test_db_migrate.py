@@ -51,3 +51,90 @@ def test_ensure_missing_columns_refuses_complex_columns(tmp_path):
 
     with pytest.raises(RuntimeError, match="复杂迁移"):
         ensure_missing_columns(engine, metadata=Base2.metadata)
+
+
+# ---------- V0.3 迁移回归：真实 alembic 升级路径（旧库 → head） ----------
+
+def _upgrade_to(cfg, revision: str) -> None:
+    from alembic import command
+
+    command.upgrade(cfg, revision)
+
+
+def test_migration_v03_sector_backfills_other(tmp_path, monkeypatch):
+    """旧库（无 sector 列）已有历史行 → upgrade head →
+    旧行 sector='other'（不产生 NULL）、索引存在；新行默认 other。"""
+    import sqlite3
+
+    from alembic.config import Config
+
+    from app.core import config as config_mod
+
+    db_path = tmp_path / "mig_v03.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    config_mod.get_settings.cache_clear()
+    try:
+        cfg = Config(str(config_mod.PROJECT_ROOT / "backend" / "alembic.ini"))
+        cfg.set_main_option(
+            "script_location", str(config_mod.PROJECT_ROOT / "backend" / "alembic")
+        )
+        # 1) 升级到 V0.2.2 旧版本（无 sector 列）
+        _upgrade_to(cfg, "87c3300ba3ba")
+        # 2) 写入旧 schema 的历史数据（模拟用户已有数据库）
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO discovered_jobs (source_id, source_name, source_url, status,"
+            " discovered_at, last_seen_at) VALUES ('s1','S1','https://x/1','new',"
+            " '2026-01-01 00:00:00','2026-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO collector_run_items (run_id, source_id, source_name, status,"
+            " started_at, fetched_count, new_count, duplicate_count,"
+            " possible_duplicate_count, filtered_count)"
+            " VALUES (1,'s1','S1','success','2026-01-01 00:00:00',0,0,0,0,0)"
+        )
+        conn.commit()
+        conn.close()
+        # 3) 升级到 head（V0.3 加 sector 列）
+        _upgrade_to(cfg, "head")
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT sector FROM discovered_jobs WHERE source_id='s1'"
+        ).fetchone()
+        assert row is not None and row[0] == "other"      # 历史行回填 other，非 NULL
+        row2 = conn.execute(
+            "SELECT sector FROM collector_run_items WHERE source_id='s1'"
+        ).fetchone()
+        assert row2 is not None and row2[0] == "other"
+        indexes = [str(i[1]) for i in conn.execute("PRAGMA index_list(discovered_jobs)")]
+        assert any("sector" in name for name in indexes)  # 索引存在
+        conn.close()
+    finally:
+        config_mod.get_settings.cache_clear()  # 恢复（避免影响其他测试）
+
+
+def test_ensure_missing_columns_supports_indexed_columns(tmp_path):
+    """桌面升级路径：索引列也能补（ADD COLUMN 后 CREATE INDEX）。"""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import declarative_base
+
+    from app.db.migrate import ensure_missing_columns
+
+    db_path = tmp_path / "idx.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY)"))
+
+    Base2 = declarative_base()
+
+    class T(Base2):
+        __tablename__ = "t"
+        id = sa.Column(sa.Integer, primary_key=True)
+        sector = sa.Column(sa.String(24), default="other", nullable=False, index=True)
+
+    added = ensure_missing_columns(engine, metadata=Base2.metadata)
+    assert added == ["t.sector"]
+    with engine.connect() as conn:
+        indexes = [str(i[1]) for i in conn.execute(text("PRAGMA index_list(t)"))]
+        assert any("sector" in name for name in indexes)
+    assert ensure_missing_columns(engine, metadata=Base2.metadata) == []  # 幂等

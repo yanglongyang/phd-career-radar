@@ -7,6 +7,7 @@ import { Button, Card, EmptyState, Field, Input, PageHeader, Select } from "../c
 const ORG_TYPES = [
   { value: "university", label: "高校" },
   { value: "research_institute", label: "科研院所" },
+  { value: "state_owned", label: "央国企" },
   { value: "enterprise", label: "企业" },
   { value: "hospital", label: "医院" },
   { value: "other", label: "其他" },

@@ -50,6 +50,15 @@ export default function JobsPage() {
       <Card className="mb-4 p-3">
         <div className="grid grid-cols-6 gap-2">
           <Input placeholder="搜索岗位/院系…" value={filters.q ?? ""} onChange={(e) => set({ q: e.target.value })} />
+          <Select value={filters.organization_type ?? ""} onChange={(e) => set({ organization_type: e.target.value })}>
+            <option value="">全部单位性质</option>
+            <option value="university">高校</option>
+            <option value="research_institute">科研院所</option>
+            <option value="state_owned">央国企</option>
+            <option value="enterprise">企业</option>
+            <option value="hospital">医院</option>
+            <option value="other">其他</option>
+          </Select>
           <Select value={filters.job_category ?? ""} onChange={(e) => set({ job_category: e.target.value })}>
             <option value="">全部类型</option>
             {Object.entries(JOB_CATEGORY_LABELS).map(([value, label]) => (

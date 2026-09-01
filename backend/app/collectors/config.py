@@ -16,6 +16,12 @@ from app.core.config import CONFIG_DIR
 
 KNOWN_TYPES = {"json_api", "html_list"}
 
+# 来源/单位性质分类（V0.3）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
+# 与 JobCategory（岗位性质）正交。sector 是来源元数据，不是 AI 推断。
+ALLOWED_SECTORS = {"university", "state_owned", "enterprise", "mixed", "other"}
+# mixed：一个 source 内可能同时包含多类单位，无法由 source 本身唯一决定 ——
+# 此时由 RawJob.sector_hint（能确定时）逐条覆盖。
+
 # 列表页日期格式多种多样（2026.08.24 / 2023-07-05 / 发布日期：2016-11-29 / 2025年9月8日），
 # 统一按"第一个完整日期"提取；用于 max_age_days 过期岗位过滤。
 _DATE_PATTERN = re.compile(r"(?P<y>\d{4})[-/.年](?P<m>\d{1,2})[-/.月](?P<d>\d{1,2})日?")
@@ -74,7 +80,6 @@ class SourceConfig:
     name: str
     type: str
     enabled: bool
-    category: str = "other"
     organization: str | None = None
     url: str = ""
     request: RequestConfig = field(default_factory=RequestConfig)
@@ -83,7 +88,14 @@ class SourceConfig:
     detail: dict = field(default_factory=dict)
     mapping: dict = field(default_factory=dict)
     max_age_days: int | None = None
+    sector: str = "other"
     raw: dict = field(default_factory=dict)
+
+    @property
+    def category(self) -> str:
+        """legacy alias（V0.3）：旧配置用 category，新配置统一用 sector。
+        只读兼容属性，避免两个字段成为两个事实源。"""
+        return self.sector
 
 
 def _require_type(value, expected: type, field_name: str, source_id: str) -> None:
@@ -123,6 +135,17 @@ def parse_source(raw: dict) -> SourceConfig:
         if value is not None and not isinstance(value, dict):
             raise SourceConfigError(f"[{source_id}] {key} 必须是对象")
 
+    # V0.3：sector 优先；legacy category 兼容读取（旧配置 category: university 不报错）
+    sector = raw.get("sector", raw.get("category", "other"))
+    if not isinstance(sector, str) or not sector.strip():
+        raise SourceConfigError(f"[{source_id}] sector 必须是字符串")
+    sector = sector.strip()
+    if sector not in ALLOWED_SECTORS:
+        raise SourceConfigError(
+            f"[{source_id}] 未知 sector: {sector!r}（支持 {sorted(ALLOWED_SECTORS)}；"
+            "旧配置的 category 仍兼容读取）"
+        )
+
     max_age_days = raw.get("max_age_days")
     if max_age_days is not None:
         if not isinstance(max_age_days, int) or isinstance(max_age_days, bool) or max_age_days <= 0:
@@ -133,7 +156,6 @@ def parse_source(raw: dict) -> SourceConfig:
         name=name,
         type=ctype,
         enabled=enabled,
-        category=str(raw.get("category", "other")),
         organization=raw.get("organization"),
         url=url,
         request=RequestConfig(
@@ -145,6 +167,7 @@ def parse_source(raw: dict) -> SourceConfig:
         detail=raw.get("detail") or {},
         mapping=raw.get("mapping") or {},
         max_age_days=max_age_days,
+        sector=sector,
         raw=raw,
     )
 
@@ -160,22 +183,30 @@ def _read_sources_yaml() -> dict:
     return data or {}
 
 
+def _raw_sector_hint(item) -> str:
+    """从原始配置（可能解析失败的 item）尽量提取 sector，供 run item 保留组别；
+    无法确定时回落 other。"""
+    value = item.get("sector", item.get("category", "other")) if isinstance(item, dict) else "other"
+    return value if isinstance(value, str) and value in ALLOWED_SECTORS else "other"
+
+
 def load_sources() -> tuple[list[SourceConfig], list[dict]]:
     """逐条解析（P0-1）：单个配置错误不阻塞其他 source。
 
     返回 (valid_sources, config_errors)。config_errors 元素：
-    {source_id, name, error}；id 缺失时 source_id 用占位。"""
+    {source_id, name, sector, error}；id 缺失时 source_id 用占位。"""
     data = _read_sources_yaml()
     raw_list = data.get("collectors") or []
     valid: list[SourceConfig] = []
     errors: list[dict] = []
     seen_ids: set[str] = set()
     if not isinstance(raw_list, list):
-        return [], [{"source_id": "?", "name": "sources.yaml", "error": "collectors 必须是列表"}]
+        return [], [{"source_id": "?", "name": "sources.yaml", "sector": "other",
+                     "error": "collectors 必须是列表"}]
     for index, item in enumerate(raw_list):
         if not isinstance(item, dict):
             errors.append({"source_id": f"item#{index}", "name": f"item#{index}",
-                           "error": "source 必须是对象"})
+                           "sector": "other", "error": "source 必须是对象"})
             continue
         source_id = str(item.get("id", "")).strip()
         name = str(item.get("name", "")).strip() or source_id or f"item#{index}"
@@ -184,6 +215,7 @@ def load_sources() -> tuple[list[SourceConfig], list[dict]]:
         if source_id:
             if source_id in seen_ids:
                 errors.append({"source_id": source_id, "name": name,
+                               "sector": _raw_sector_hint(item),
                                "error": f"source id 重复: {source_id!r}（id 必须全局唯一）"})
                 continue
             seen_ids.add(source_id)
@@ -191,7 +223,7 @@ def load_sources() -> tuple[list[SourceConfig], list[dict]]:
             parsed = parse_source(item)
         except SourceConfigError as e:
             errors.append({"source_id": source_id or f"item#{index}", "name": name,
-                           "error": str(e)})
+                           "sector": _raw_sector_hint(item), "error": str(e)})
             continue
         valid.append(parsed)
     return valid, errors
