@@ -32,9 +32,11 @@ async def lifespan(_: FastAPI):
         Base.metadata.create_all(engine)
         # 桌面版升级：create_all 不补已有表的缺失列，这里补普通列
         # （主键/外键/唯一/索引列变更仍必须走 alembic，见 app/db/migrate.py）
-        from app.db.migrate import ensure_missing_columns
+        from app.db.migrate import backfill_legacy_sectors, ensure_missing_columns
 
         ensure_missing_columns(engine)
+        # V0.3.1 一次性数据修正：V0.3 之前发现的学校招聘旧记录回填为 university
+        backfill_legacy_sectors(engine)
     yield
 
 

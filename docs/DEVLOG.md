@@ -1320,3 +1320,22 @@ PR 事件未触发属 GitHub 瞬时投递异常，非持续问题），合并后
 - 真实抓取冒烟：5 源全 success 0 失败；SASAC 首次入库 4 条 state_owned；
   旧数据行保持 other（发现时冻结语义）。
 - API 实测：sector=state_owned → 4 条全 state_owned；other,mixed → 25 条。
+
+## V0.3.1 — legacy 高校来源 sector 一次性回填（2026-09-01）
+
+用户反馈：部分学校招聘出现在"其他"里。根因：V0.3 迁移按规格把历史行统一回填为
+`other`（"existing rows -> other"），V0.3 之前发现的学校招聘（上交/华科/北大）
+因此全部落在其他。
+
+修复（一次性、确定性，不违反"发现时冻结"原则）：
+- 迁移 `0e4b2c9d31a8`：按"发现时的来源"把已知高校来源（sjtu_postdoc /
+  sjtu_research / hust_faculty / pku_rczp / fudan_hr）的 `sector='other'` 旧记录
+  修正为 university。映射硬编码在迁移中（快照），不读取 sources.yaml ——
+  未来修改配置仍不回溯历史。
+- 桌面升级路径（app/db/migrate.backfill_legacy_sectors + main.py lifespan）：
+  同样映射、同样只动 sector='other' 的行，幂等，exe 旧库启动即修正。
+- 不覆盖任何非 other 的已有值；未知来源保持 other。
+
+验证：dev DB 25 条 other → university（分布 university 25 / state_owned 4）；
+pytest **264 passed**（+2：迁移回填（已知源修正/未知保持/非 other 不覆盖）、
+启动函数幂等）；ruff / secret scan 全绿。
