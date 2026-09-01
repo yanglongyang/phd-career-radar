@@ -49,9 +49,14 @@ phd-career-radar/
 └── README.md
 ```
 
-## 招聘发现（V0.2 Collector）
+## 招聘发现（V0.2 Collector + V0.3 sector）
 
 - 「招聘发现」页：点击“立即检查招聘更新”→ 逐 source 抓取（source 级状态可见）→ 新材料进入 Inbox；
+- **sector（V0.3）**：来源/单位性质分类（高校/央国企/企业/混合/其他），与 JobCategory（岗位性质）正交；
+  是来源元数据而非 AI 推断；发现时冻结到 DiscoveredJob.sector，之后修改 sources.yaml 不回溯历史；
+  Inbox 顶部可按 全部/高校/央国企/企业/其他 切换，卡片带 sector badge，
+  运行结果按 sector 分组展示；sources.yaml 用 `sector:` 字段（旧 `category:` 仍兼容读取）。
+  聚合来源（如国资委招聘栏目）organization 留空 —— 来源机构 ≠ 招聘单位；
 - 确定性去重：同 source_job_id / 同 canonical URL（含 utm 清理）/ 同指纹自动去重并更新 last_seen；
 - 疑似重复（同单位+标题高度相似+URL 不同）只标记不合并，由你决定；
 - 关键词过滤（sources.yaml filters）为确定性 pre-filter，命中计数保留在运行摘要；

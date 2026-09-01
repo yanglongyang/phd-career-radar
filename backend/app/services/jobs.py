@@ -272,6 +272,7 @@ def list_jobs(
     province: str | None = None,
     city: str | None = None,
     organization_id: int | None = None,
+    organization_type: str | None = None,
     recommendation: str | None = None,
     risk_level: str | None = None,
     confidence: str | None = None,
@@ -303,6 +304,11 @@ def list_jobs(
         stmt = stmt.where(Job.city == city)
     if organization_id:
         stmt = stmt.where(Job.organization_id == organization_id)
+    if organization_type:
+        # V0.3 P2：按正式单位的组织类型筛选（university/state_owned/enterprise/...）
+        stmt = stmt.where(
+            Job.organization.has(Organization.organization_type == organization_type)
+        )
     if recommendation:
         stmt = stmt.where(ev.recommendation_level == recommendation)
     if risk_level:

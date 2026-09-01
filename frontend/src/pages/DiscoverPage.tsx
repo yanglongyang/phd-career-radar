@@ -4,11 +4,12 @@ import { Link } from "react-router-dom";
 import {
   extractDiscoveredJob,
   listCollectorRuns,
+  listCollectorSources,
   listDiscoveredJobs,
   patchDiscoveredJob,
   runCollectors,
 } from "../services/api";
-import type { CollectorRun, CollectorRunItem, DiscoveredJob } from "../types";
+import type { CollectorRun, CollectorRunItem, CollectorSource, DiscoveredJob } from "../types";
 import {
   Badge,
   Button,
@@ -19,11 +20,21 @@ import {
   EmptyState,
   PageHeader,
   Select,
+  Tabs,
 } from "../components/ui";
 import { formatDate } from "../lib/utils";
+import {
+  SECTOR_TABS,
+  groupRunItemsBySector,
+  sectorLabel,
+  sectorQueryForTab,
+  sectorTone,
+} from "../lib/sector";
 
-/* 招聘发现（V0.2 Inbox）：立即检查招聘更新 + source 级运行结果 + 待审核材料。
-   Collector 只负责发现；AI 解析后走现有 Preview → 确认 → 正式 Job 流程。 */
+/* 招聘发现（V0.2 Inbox + V0.3 sector）：
+   Collector 只负责发现；AI 解析后走现有 Preview → 确认 → 正式 Job 流程。
+   sector（高校/央国企/企业/其他）是来源/单位性质分类，与 JobCategory 正交，
+   发现时冻结；source 与 organization 是两个不同语义（来源 ≠ 招聘单位）。 */
 
 const STATUS_LABELS: Record<string, string> = {
   new: "新发现",
@@ -65,6 +76,8 @@ function runStatusTone(status: string) {
 
 export default function DiscoverPage() {
   const queryClient = useQueryClient();
+  const [sectorTab, setSectorTab] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -72,9 +85,19 @@ export default function DiscoverPage() {
     queryKey: ["collector-runs"],
     queryFn: () => listCollectorRuns(3),
   });
+  const sourcesQuery = useQuery({
+    queryKey: ["collector-sources"],
+    queryFn: listCollectorSources,
+  });
   const inboxQuery = useQuery({
-    queryKey: ["discovered", statusFilter],
-    queryFn: () => listDiscoveredJobs({ status: statusFilter || undefined, page_size: 50 }),
+    queryKey: ["discovered", sectorTab, sourceFilter, statusFilter],
+    queryFn: () =>
+      listDiscoveredJobs({
+        status: statusFilter || undefined,
+        sector: sectorQueryForTab(sectorTab),
+        source_id: sourceFilter || undefined,
+        page_size: 50,
+      }),
   });
 
   const runMutation = useMutation({
@@ -107,6 +130,8 @@ export default function DiscoverPage() {
 
   const lastRun: CollectorRun | undefined = runsQuery.data?.[0];
   const items = inboxQuery.data?.items ?? [];
+  const enabledSources: CollectorSource[] =
+    sourcesQuery.data?.sources.filter((s) => s.enabled) ?? [];
 
   return (
     <div className="space-y-4">
@@ -147,22 +172,33 @@ export default function DiscoverPage() {
               <span>进度 {lastRun.completed_source_count} / {lastRun.source_count}</span>
             </div>
             {lastRun.items.length > 0 && (
-              <div className="space-y-1">
-                {lastRun.items.map((it: CollectorRunItem) => (
-                  <div key={it.id} className="flex items-center gap-2 text-xs">
-                    <Badge tone={runStatusTone(it.status)}>{it.status}</Badge>
-                    <span className="font-medium">{it.source_name}</span>
-                    {it.status === "success" ? (
-                      <span className="text-zinc-400">
-                        {it.new_count} 新增 / {it.duplicate_count} 已存在
-                        {it.filtered_count ? ` / 过滤 ${it.filtered_count}` : ""}
-                        {it.recency_skipped_count ? ` / 过期跳过 ${it.recency_skipped_count}` : ""}
-                      </span>
-                    ) : it.status === "failed" ? (
-                      <span className="text-red-500">{it.error_message ?? "失败"}</span>
-                    ) : (
-                      <span className="text-amber-500">进行中…</span>
-                    )}
+              /* V0.3：运行结果按 sector 分组展示（presentation grouping，
+                 不改 source 级事务隔离 / failed_source_count / run.status 语义） */
+              <div className="space-y-3">
+                {groupRunItemsBySector(lastRun.items).map((group) => (
+                  <div key={group.sector}>
+                    <p className="mb-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                      {sectorLabel(group.sector)}
+                    </p>
+                    <div className="space-y-1">
+                      {group.items.map((it: CollectorRunItem) => (
+                        <div key={it.id} className="flex items-center gap-2 text-xs">
+                          <Badge tone={runStatusTone(it.status)}>{it.status}</Badge>
+                          <span className="font-medium">{it.source_name}</span>
+                          {it.status === "success" ? (
+                            <span className="text-zinc-400">
+                              {it.new_count} 新增 / {it.duplicate_count} 已存在
+                              {it.filtered_count ? ` / 过滤 ${it.filtered_count}` : ""}
+                              {it.recency_skipped_count ? ` / 过期跳过 ${it.recency_skipped_count}` : ""}
+                            </span>
+                          ) : it.status === "failed" ? (
+                            <span className="text-red-500">{it.error_message ?? "失败"}</span>
+                          ) : (
+                            <span className="text-amber-500">进行中…</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -172,18 +208,36 @@ export default function DiscoverPage() {
       )}
 
       <Card>
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle>Inbox（{inboxQuery.data?.total ?? 0}）</CardTitle>
-          <Select
-            className="w-36"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">全部状态</option>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </Select>
+        <CardHeader className="space-y-3">
+          <div className="flex items-center justify-between">
+            <CardTitle>Inbox（{inboxQuery.data?.total ?? 0}）</CardTitle>
+          </div>
+          {/* V0.3：sector 主分类 tabs —— 全部 | 高校 | 央国企 | 企业 | 其他 */}
+          <Tabs tabs={SECTOR_TABS} value={sectorTab} onChange={setSectorTab} />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500">来源：</span>
+            <Select
+              className="w-56"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+            >
+              <option value="">全部来源</option>
+              {enabledSources.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </Select>
+            <span className="ml-3 text-xs text-zinc-500">状态：</span>
+            <Select
+              className="w-36"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="">全部状态</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="py-4">
           {inboxQuery.isError ? (
@@ -201,6 +255,7 @@ export default function DiscoverPage() {
                 <div key={job.id} className="rounded-md border border-zinc-200 px-3 py-2.5 text-sm dark:border-zinc-700">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={statusTone(job.status)}>{STATUS_LABELS[job.status] ?? job.status}</Badge>
+                    <Badge tone={sectorTone(job.sector)}>{sectorLabel(job.sector)}</Badge>
                     {job.status === "possible_duplicate" && (
                       <Badge tone="red">疑似重复</Badge>
                     )}
@@ -246,4 +301,3 @@ export default function DiscoverPage() {
     </div>
   );
 }
-

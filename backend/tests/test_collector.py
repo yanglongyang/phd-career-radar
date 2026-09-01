@@ -894,3 +894,120 @@ def test_runner_recency_filter_skips_old_jobs(client, db_session, monkeypatch):
     item = run.items[0]
     assert item.recency_skipped_count == 2
     assert item.new_count == 1
+# ---------- V0.3 sector：来源/单位性质分类 ----------
+
+def test_parse_source_sector_explicit():
+    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                        "url": "https://x", "sector": "state_owned"})
+    assert src.sector == "state_owned"
+    assert src.category == "state_owned"  # legacy alias 同值
+
+
+def test_parse_source_sector_legacy_category_fallback():
+    """旧配置 category: university 不报错，兼容读取为 sector。"""
+    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                        "url": "https://x", "category": "university"})
+    assert src.sector == "university"
+
+
+def test_parse_source_sector_defaults_other():
+    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True, "url": "https://x"})
+    assert src.sector == "other"
+
+
+def test_parse_source_sector_invalid_rejected():
+    """非法 sector 值/类型 → 明确报错（配置错误只影响该 source）。"""
+    with pytest.raises(Exception, match="sector"):
+        parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                      "url": "https://x", "sector": "univeristy"})
+    with pytest.raises(Exception, match="sector"):
+        parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                      "url": "https://x", "sector": 42})
+
+
+def test_runner_persists_effective_sector(client, db_session, monkeypatch):
+    """effective_sector = raw.sector_hint or source.sector 三种组合；
+    CollectorRunItem.sector = source.sector。"""
+    from app.models import DiscoveredJob
+    from app.services.collector_runner import run_collectors
+
+    def mk(title, url, job_id, sector_hint=None):
+        from app.collectors.base import RawJob
+
+        return RawJob(
+            source_id="X", source_name="X", title=title,
+            source_job_id=job_id, source_url=url, organization_hint="测试单位",
+            sector_hint=sector_hint,
+        )
+
+    _fake_collector(monkeypatch, {
+        "U": [mk("高校教授招聘", "https://u.com/1", "u1")],
+        "M1": [mk("混合源企业岗位", "https://m.com/1", "m1", sector_hint="enterprise")],
+        "M2": [mk("混合源未定岗位", "https://m.com/2", "m2")],
+    })
+    srcs = [
+        SourceConfig(id="U", name="高校", type="json_api", enabled=True, url="https://u", sector="university"),
+        SourceConfig(id="M1", name="混合1", type="json_api", enabled=True, url="https://m1", sector="mixed"),
+        SourceConfig(id="M2", name="混合2", type="json_api", enabled=True, url="https://m2", sector="mixed"),
+    ]
+    run = run_collectors(db_session, srcs)
+    db_session.commit()
+
+    rows = {r.source_id: r.sector for r in db_session.query(DiscoveredJob).all()}
+    assert rows["U"] == "university"        # source.sector
+    assert rows["M1"] == "enterprise"       # raw.sector_hint 覆盖
+    assert rows["M2"] == "mixed"            # 未确定 → source.sector
+    item_sector = {i.source_id: i.sector for i in run.items}
+    assert item_sector == {"U": "university", "M1": "mixed", "M2": "mixed"}
+
+
+def test_discovered_jobs_sector_filter(client, db_session):
+    """GET /discovered-jobs?sector=... 单值 / 逗号列表 / 与 status 联合。"""
+    from app.models import DiscoveredJob
+
+    db_session.add_all([
+        DiscoveredJob(source_id="u", source_name="高校", sector="university",
+                      source_url="https://u/1", title_raw="教授招聘", status="new"),
+        DiscoveredJob(source_id="s", source_name="国资委", sector="state_owned",
+                      source_url="https://s/1", title_raw="央企招聘", status="new"),
+        DiscoveredJob(source_id="m", source_name="混合", sector="mixed",
+                      source_url="https://m/1", title_raw="岗位", status="new"),
+        DiscoveredJob(source_id="o", source_name="其他", sector="other",
+                      source_url="https://o/1", title_raw="岗位", status="reviewing"),
+    ])
+    db_session.commit()
+
+    r = client.get("/api/discovered-jobs?sector=university").json()
+    assert r["total"] == 1
+    assert [i["sector"] for i in r["items"]] == ["university"]
+    assert r["items"][0]["source_name"] == "高校"  # Out 含 sector 与 source
+
+    r2 = client.get("/api/discovered-jobs?sector=other,mixed").json()
+    assert r2["total"] == 2
+    assert {i["sector"] for i in r2["items"]} == {"mixed", "other"}
+
+    r3 = client.get("/api/discovered-jobs?sector=other,mixed&status=reviewing").json()
+    assert r3["total"] == 1
+    assert r3["items"][0]["sector"] == "other"
+
+    r4 = client.get("/api/discovered-jobs?sector=state_owned&source_id=s").json()
+    assert r4["total"] == 1
+
+
+def test_collector_sources_endpoint_emits_sector(client, monkeypatch):
+    """GET /collectors/sources 输出 sector（含 legacy category alias）。"""
+    from app.api.routes import collectors as collectors_routes
+
+    monkeypatch.setattr(
+        collectors_routes, "load_sources",
+        lambda: ([
+            SourceConfig(id="A", name="A", type="json_api", enabled=True,
+                         url="https://x.com/a", sector="university"),
+            SourceConfig(id="B", name="B", type="json_api", enabled=False,
+                         url="https://x.com/b", sector="state_owned"),
+        ], []),
+    )
+    data = client.get("/api/collectors/sources").json()
+    assert data["sources"][0]["sector"] == "university"
+    assert data["sources"][0]["category"] == "university"  # legacy alias
+    assert data["sources"][1]["sector"] == "state_owned"

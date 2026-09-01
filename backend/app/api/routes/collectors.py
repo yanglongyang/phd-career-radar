@@ -41,6 +41,7 @@ def _run_to_out(run: CollectorRun) -> CollectorRunOut:
                 "id": i.id,
                 "source_id": i.source_id,
                 "source_name": i.source_name,
+                "sector": i.sector,
                 "status": i.status,
                 "started_at": i.started_at,
                 "finished_at": i.finished_at,
@@ -62,6 +63,7 @@ def _discovered_to_out(d: DiscoveredJob) -> DiscoveredJobOut:
         id=d.id,
         source_id=d.source_id,
         source_name=d.source_name,
+        sector=d.sector,
         source_job_id=d.source_job_id,
         source_url=d.source_url,
         canonical_url=d.canonical_url,
@@ -120,7 +122,9 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 
 @router.get("/collectors/sources")
 def list_source_configs():
-    """展示 sources.yaml 当前配置（含 enabled 状态与配置错误）。"""
+    """展示 sources.yaml 当前配置（含 enabled 状态、sector 与配置错误）。
+
+    sector 为 V0.3 来源/单位性质分类；category 为 legacy alias（同值）。"""
     sources, errors = load_sources()
     return {
         "sources": [
@@ -129,7 +133,8 @@ def list_source_configs():
                 "name": s.name,
                 "type": s.type,
                 "enabled": s.enabled,
-                "category": s.category,
+                "sector": s.sector,
+                "category": s.sector,  # legacy alias
                 "organization": s.organization,
                 "url": s.url,
             }
@@ -143,6 +148,7 @@ def list_source_configs():
 def list_discovered(
     status: str | None = Query(None),
     source_id: str | None = Query(None),
+    sector: str | None = Query(None),
     organization: str | None = Query(None),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -154,6 +160,11 @@ def list_discovered(
         stmt = stmt.where(DiscoveredJob.status == status)
     if source_id:
         stmt = stmt.where(DiscoveredJob.source_id == source_id)
+    if sector:
+        # 支持逗号分隔多值：?sector=other,mixed（"其他" tab 同时查两组）
+        values = [v.strip() for v in sector.split(",") if v.strip()]
+        if values:
+            stmt = stmt.where(DiscoveredJob.sector.in_(values))
     if organization:
         stmt = stmt.where(DiscoveredJob.organization_hint.ilike(f"%{organization}%"))
     if q:

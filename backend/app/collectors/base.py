@@ -27,6 +27,7 @@ class RawJob:
     description_raw: str | None = None
     organization_hint: str | None = None
     location_hint: str | None = None
+    sector_hint: str | None = None
     raw_payload: dict | None = field(default_factory=dict)
 
 

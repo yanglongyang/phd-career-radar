@@ -1251,3 +1251,72 @@ A→B 迁移回归测试在 required CI 里被静默跳过（CI 日志 246 passe
 验证：CI（windows runner）实测 **249 passed, 4 skipped** —— 跳过的只剩 4 个
 真正需要桌面的 GUI 测试；本地全量 253 passed。PR #3 自动触发 CI（此前一次
 PR 事件未触发属 GitHub 瞬时投递异常，非持续问题），合并后 main = b5918d7。
+
+## V0.3 — Multi-source + Sector Separation（2026-09-01）
+
+目标：从"几个高校来源的招聘发现器"升级为可长期扩展高校/央国企/企业三类来源的
+多来源招聘雷达。核心原则：sector（来源/单位性质）与 JobCategory（岗位性质）
+两个维度正交；sector 是来源元数据，不是 AI 推断；发现时冻结。
+
+### 数据模型
+
+- `SourceConfig`：正式字段 `sector`（university/state_owned/enterprise/mixed/other，
+  非法值明确报错）；legacy `category` 兼容读取（`sector = raw.get("sector",
+  raw.get("category", "other"))`），并保留只读 property `category`（同值，
+  不成为第二个事实源）。配置错误的 source 在 error dict 中尽量保留 sector。
+- `RawJob`：新增 `sector_hint`（mixed 源逐条确定时填写）。
+- `DiscoveredJob`：新增 `sector` 列（String(24)，default other，index）。
+  持久化规则 `effective_sector = raw.sector_hint or source.sector`。
+- `CollectorRunItem`：新增 `sector`（= source.sector；配置错误源用 raw 里能取到的）。
+  CollectorRun 不加分组统计列（前端按 items 动态分组）。
+- `Organization.organization_type` 允许值注释扩展：+ state_owned / hospital；
+  明确与 DiscoveredJob.sector 生命周期不同（发现阶段 hint vs 入库确认事实，
+  不做后台自动同步覆盖）。
+
+### Migration
+
+- `9834a5845c71`（v0.3 sector on discovered jobs and run items）：
+  discovered_jobs.sector + collector_run_items.sector，均 `server_default='other'`，
+  旧行回填 other、不产生 NULL；discovered_jobs.sector 建索引。
+  历史记录来源分类在发现时冻结 —— 不根据当前 sources.yaml 反查。
+- `ensure_missing_columns`（桌面升级路径）扩展支持普通索引列（ADD COLUMN 后
+  CREATE INDEX），exe 旧库升级不报错。
+
+### API
+
+- `GET /discovered-jobs`：新增 `sector` 参数，支持逗号列表（`?sector=other,mixed`，
+  "其他" tab 同时查两组）；与 status/source_id/organization/q 联合筛选；
+  `DiscoveredJobOut` 增加 sector。
+- `GET /collectors/sources`：输出 `sector`（+ legacy alias `category`）。
+- `GET /jobs`（P2）：新增 `organization_type` 筛选（正式单位组织类型）。
+
+### UI
+
+- DiscoverPage：Inbox 顶部 sector tabs（全部/高校/央国企/企业/其他）；
+  来源下拉（GET /collectors/sources 的 enabled 源）；状态下拉保留；
+  卡片增加 sector badge（高校/央国企/企业/混合/其他，独立于 source_name）；
+  上次运行结果按 sector 分组展示（presentation grouping，不改事务/统计语义）。
+- 纯函数抽到 `src/lib/sector.ts`（labels/tone/tabs/query/grouping），vitest 覆盖。
+- JobsPage（P2）：单位性质筛选下拉；OrganizationsPage ORG_TYPES + state_owned。
+
+### 来源扩展（逐项实测）
+
+| source | sector | enabled | 结果 |
+|---|---|---|---|
+| sjtu_postdoc / sjtu_research / hust_faculty / pku_rczp | university | ✅ | 行为不回归（本轮 dup，无新增异常） |
+| **sasac_recruit（国务院国资委招聘栏目）** | state_owned | ✅ | 30 条真实央企招聘（航空工业/中国电信/中国中化/中铝/中国一汽…），全部带日期；首次入库 4 条，过滤 27（关键词/专题排除） |
+| 中国公共招聘网（名企招聘/岗位搜索） | - | ❌ | 岗位列表 JS 渲染（页面只有静态筛选表单），静态不可用 |
+| 华海药业 zpgw.html（企业候选） | - | ❌ | 岗位表为猎聘聚合且数据停留在 2023 年，非公司官方列表 |
+| 复旦 hr.fudan.edu.cn | university | ❌ | 复探确认列表 JS 渲染/菜单结构，静态无公告条目 |
+
+企业 sector 本轮只做架构（sector=enterprise 配置已支持、mixed 语义明确），
+未强行接入 BOSS/猎聘/智联等高维护聚合平台。
+
+### 验证
+
+- 测试：pytest **262 passed**（+9：sector 解析 4、持久化 3 组合、API 筛选/联合、
+  sources 输出、migration 真实升级回填、索引列补列）；vitest **32 passed**（+7）；
+  ruff 全绿；tsc 通过；secret scan OK。
+- 真实抓取冒烟：5 源全 success 0 失败；SASAC 首次入库 4 条 state_owned；
+  旧数据行保持 other（发现时冻结语义）。
+- API 实测：sector=state_owned → 4 条全 state_owned；other,mixed → 25 条。

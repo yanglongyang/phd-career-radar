@@ -31,6 +31,7 @@ class CollectorRunItemOut(BaseModel):
     id: int
     source_id: str
     source_name: str
+    sector: str = "other"
     status: str
     started_at: datetime
     finished_at: datetime | None
@@ -51,6 +52,7 @@ class DiscoveredJobOut(BaseModel):
     id: int
     source_id: str
     source_name: str
+    sector: str = "other"
     source_job_id: str | None = None
     source_url: str
     canonical_url: str | None = None

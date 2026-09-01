@@ -18,7 +18,8 @@ def ensure_missing_columns(engine, metadata=None) -> list[str]:
     """为已有表补齐模型声明但数据库中缺失的普通列。返回新增列名列表。
 
     幂等：已存在的列跳过；同一引擎重复调用返回空列表。
-    遇到需要复杂迁移的列（主键/外键/唯一/索引）直接报错，不做静默重建。"""
+    支持普通索引列（ADD COLUMN 后补 CREATE INDEX）；主键/外键/唯一列
+    需要重建表，直接报错，不做静默重建（必须走 alembic）。"""
     from app.db.base import Base
 
     metadata = metadata or Base.metadata
@@ -34,10 +35,10 @@ def ensure_missing_columns(engine, metadata=None) -> list[str]:
             for col in table.columns:
                 if col.name in existing:
                     continue
-                if col.primary_key or col.foreign_keys or col.unique or col.index:
+                if col.primary_key or col.foreign_keys or col.unique:
                     raise RuntimeError(
                         f"列 {table.name}.{col.name} 需要复杂迁移"
-                        "（主键/外键/唯一/索引），请走 alembic"
+                        "（主键/外键/唯一），请走 alembic"
                     )
                 ddl = (
                     f"ALTER TABLE {table.name} ADD COLUMN {col.name} "
@@ -52,5 +53,11 @@ def ensure_missing_columns(engine, metadata=None) -> list[str]:
                 if default is not None:
                     ddl += f" DEFAULT {default}"
                 conn.execute(text(ddl))
+                if col.index:
+                    # SQLite 的 ADD COLUMN 不能直接带索引 → 补列后单独建索引
+                    conn.execute(text(
+                        f"CREATE INDEX IF NOT EXISTS ix_{table.name}_{col.name} "
+                        f"ON {table.name} ({col.name})"
+                    ))
                 added.append(f"{table.name}.{col.name}")
     return added
