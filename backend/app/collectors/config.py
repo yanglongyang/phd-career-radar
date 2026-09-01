@@ -16,11 +16,15 @@ from app.core.config import CONFIG_DIR
 
 KNOWN_TYPES = {"json_api", "html_list"}
 
-# 来源/单位性质分类（V0.3 → V0.3.2）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
+# 来源/单位性质分类（V0.3 → V0.3.3）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
 # 与 JobCategory（岗位性质）正交。sector 是来源元数据，不是 AI 推断。
 # V0.3.2：hospital 从 other 升级为独立 sector（医院/医学中心/医疗机构是正式求职方向）。
+# V0.3.3：research_institute 独立 sector（科研院所是核心求职方向）。
 # 医院与高校不重复归类：即使医院是大学附属（华西/协和），招聘主体是医院 → hospital。
-ALLOWED_SECTORS = {"university", "hospital", "state_owned", "enterprise", "mixed", "other"}
+# sector 不承载研究方向（化学/生物/探针…）—— 那是未来 domain_tags 的职责（V0.4 candidate）。
+ALLOWED_SECTORS = {
+    "university", "research_institute", "hospital", "state_owned", "enterprise", "mixed", "other",
+}
 # mixed：一个 source 内可能同时包含多类单位，无法由 source 本身唯一决定 ——
 # 此时由 RawJob.sector_hint（能确定时）逐条覆盖。
 
@@ -74,6 +78,7 @@ class RequestConfig:
     timeout_seconds: float = 15.0
     user_agent: str = "phd-career-radar/0.2 (+personal job discovery tool)"
     max_bytes: int = 5 * 1024 * 1024
+    verify_ssl: bool = True  # 仅个别证书异常的院所站点显式关闭（如 ic.cas.cn）
 
 
 @dataclass
@@ -128,6 +133,9 @@ def parse_source(raw: dict) -> SourceConfig:
     timeout = request_raw.get("timeout_seconds", 15.0)
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
         raise SourceConfigError(f"[{source_id}] request.timeout_seconds 必须是正数")
+    verify_ssl = request_raw.get("verify_ssl", True)
+    if not isinstance(verify_ssl, bool):
+        raise SourceConfigError(f"[{source_id}] request.verify_ssl 必须是 true/false")
 
     filters = raw.get("filters") or {}
     if not isinstance(filters, dict):
@@ -168,6 +176,7 @@ def parse_source(raw: dict) -> SourceConfig:
         request=RequestConfig(
             timeout_seconds=float(timeout),
             user_agent=str(request_raw.get("user_agent", "phd-career-radar/0.2")),
+            verify_ssl=verify_ssl,
         ),
         filters=filters,
         selectors=raw.get("selectors") or {},

@@ -39,7 +39,7 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "green" | "blue" | "amber" | "red" | "orange" | "zinc";
+  tone?: "neutral" | "green" | "blue" | "amber" | "red" | "orange" | "violet" | "zinc";
   className?: string;
 }) {
   return (
@@ -52,6 +52,7 @@ export function Badge({
         tone === "amber" && "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
         tone === "red" && "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
         tone === "orange" && "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+        tone === "violet" && "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
         tone === "zinc" && "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
         className,
       )}
