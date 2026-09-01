@@ -1122,15 +1122,6 @@ def test_parse_source_sector_research_institute():
     assert src.sector == "research_institute"
 
 
-def test_parse_source_request_verify_ssl_validated():
-    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
-                        "url": "https://x", "request": {"verify_ssl": False}})
-    assert src.request.verify_ssl is False
-    with pytest.raises(Exception, match="verify_ssl"):
-        parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
-                      "url": "https://x", "request": {"verify_ssl": "no"}})
-
-
 def test_runner_persists_research_institute_sector(client, db_session, monkeypatch):
     """source.sector=research_institute → DiscoveredJob.sector 同样。"""
     from app.models import DiscoveredJob

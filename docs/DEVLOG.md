@@ -1394,17 +1394,21 @@ hospital/state_owned/enterprise/mixed/other；前端 tab（全部|高校|科研�
 **Collector 增强**：request.verify_ssl（逐源显式关闭 TLS 校验，仅 ic.cas.cn 证书异常
 使用；SSRF 边界不受影响）；request.user_agent 逐源覆盖（南开/国药需浏览器 UA）。
 
-### 新增 ENABLED 来源（真实抓取验证，完整 run #5：15 源 0 失败）
+### 新增 ENABLED 来源（真实抓取验证）
 
-| source | sector | raw | new | filt | rec | 样例 |
+> 统计口径说明：raw = 当前 selector 配置下本次抓取的原始条目数；new 为**首次入库**
+> 时新增数（后续 run 中相同条目进入 duplicate）；filt/rec 为本次 run 的过滤/过期跳过数。
+> 不同 run 数据库状态不同，数字不可跨 run 直接相加。
+
+| source | sector | raw | new(首轮) | filt | rec | 样例 |
 |---|---|---|---|---|---|---|
-| cemcs_research 分子细胞卓越中心研究组 | research_institute | 15 | 14(首轮) | 0 | 0 | 陈飞组招聘特别研究助理/博士后 |
+| cemcs_research 分子细胞卓越中心研究组 | research_institute | 15 | 14 | 0 | 0 | 陈飞组招聘特别研究助理/博士后 |
 | iccas_recruit 中科院化学所人才招聘 | research_institute | 15 | 8 | 1 | 1 | 交叉研究中心杨驰远课题组博士后和项目聘用人员招聘启事 |
-| simm_research 上海药物所科研岗位 | research_institute | 10 | 7(首轮) | 0 | 0 | 张乃霞课题组特别研究助理招聘启事 |
-| sxicc_gcc 山西煤化所高层次人才 | research_institute | 6 | 4(首轮) | 1 | 1 | 2026-2027年度科研人员第一次招聘启事 |
-| sxicc_bsh 山西煤化所博士后 | research_institute | 1 | 1(首轮) | 0 | 0 | 博士后招聘启事 |
+| simm_research 上海药物所科研岗位 | research_institute | 10 | 7 | 0 | 0 | 张乃霞课题组特别研究助理招聘启事 |
+| sxicc_gcc 山西煤化所高层次人才 | research_institute | 6 | 4 | 1 | 1 | 2026-2027年度科研人员第一次招聘启事 |
+| sxicc_bsh 山西煤化所博士后 | research_institute | 1 | 1 | 0 | 0 | 博士后招聘启事 |
 | nankai_faculty 南开大学人事处 | university | 11 | 4 | 1 | 4 | 2026年人才引进、教职工公开招聘、博士后招收公告 |
-| sinopharm_recruit 中国医药集团招聘公告 | state_owned | 8 | 12(首轮) | 2 | 0 | 全球高层次人才招聘公告（列表无日期，无法 recency） |
+| sinopharm_recruit 中国医药集团招聘公告 | state_owned | 8 | 12 | 2 | 0 | 全球高层次人才招聘公告（列表无日期，无法 recency） |
 
 **UNSUPPORTED（如实报告）**：生物物理所 ibp.cas.cn/zp（JS）、国家纳米中心（无招聘栏目）、
 杭州医学所（列表 JS）、复旦中山（521 WAF）、浙大一院（Struts JS）、北大人民/瑞金（JS）、
@@ -1415,7 +1419,22 @@ hospital/state_owned/enterprise/mixed/other；前端 tab（全部|高校|科研�
 ### 验证
 
 - 测试：pytest **276 passed**（+6：research_institute 解析/持久化/API 筛选、
-  verify_ssl 校验、relevance 回归 5 保留 + 5 过滤 fixture）；vitest 32（tabs/
-  badge/分组含科研院所）；ruff / secret scan 全绿。
-- 完整 run #5：sources=15 completed=15 failed=0；new=12 dup=91 possible=7
+  relevance 回归 5 保留 + 5 过滤 fixture）；vitest 32（tabs/badge/分组含科研院所）；
+  ruff / secret scan 全绿。
+- 开发库 run #5：sources=15 completed=15 failed=0；new=12 dup=91 possible=7
   filtered=64 recency=22。
+- 打包版冒烟（全新 DB，run #6）：sources=15 completed=15 failed=0；new=47 dup=48
+  possible=15 filtered=64 recency=22 —— 与开发库数字不同是因为**全新数据库首次入库**
+  （大部分历史条目在新库中都是 new），两套数字对应不同 run/DB 状态，不可混读。
+
+## V0.3.3 closure — ICCAS TLS workaround 撤回（2026-09-01）
+
+验收发现：`www.ic.cas.cn` TLS 握手失败并非站点证书问题，而是 **www 主机名选错** ——
+`https://ic.cas.cn/re/`（无 www）在默认 TLS 校验下正常可用。因此：
+
+- iccas_recruit URL 改为 `https://ic.cas.cn/re/`，删除 `verify_ssl: false`；
+- **整个 verify_ssl 配置能力撤回**（SafeFetcher / RequestConfig / html_list /
+  json_api / 相关测试），Collector 恢复纯默认 TLS 校验，不保留 TLS bypass 安全面；
+- 真实 smoke：iccas 无 www + 默认 TLS 抓取 15 条正常（含 2026-08-31 交叉研究中心
+  博士后/项目聘用招聘启事）。
+- 测试：pytest **275 passed**（-1 verify_ssl 测试）；ruff / secret scan 全绿。

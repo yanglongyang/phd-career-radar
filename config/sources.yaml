@@ -189,11 +189,10 @@ collectors:
     enabled: true
     sector: research_institute
     organization: 中国科学院化学研究所
-    url: https://www.ic.cas.cn/re/
+    # 注意：必须用无 www 的主机名（www.ic.cas.cn TLS 握手失败；ic.cas.cn 正常）
+    url: https://ic.cas.cn/re/
     request:
       timeout_seconds: 20
-      # 站点 TLS 证书异常（握手失败）—— 逐源显式关闭证书校验；SSRF 边界不受影响
-      verify_ssl: false
     max_age_days: 365
     selectors:
       item: "div.list-news ul li"
