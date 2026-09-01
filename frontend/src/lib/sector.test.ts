@@ -14,40 +14,49 @@ describe("sector 派生逻辑", () => {
   it("sector tab 切换映射正确的 API 参数", () => {
     expect(sectorQueryForTab("")).toBeUndefined();        // 全部 -> 不传
     expect(sectorQueryForTab("university")).toBe("university");
+    expect(sectorQueryForTab("hospital")).toBe("hospital");
     expect(sectorQueryForTab("state_owned")).toBe("state_owned");
     expect(sectorQueryForTab("other,mixed")).toBe("other,mixed");  // 其他 -> 逗号列表
   });
 
-  it("sector tabs 覆盖 全部/高校/央国企/企业/其他", () => {
-    expect(SECTOR_TABS.map((t) => t.label)).toEqual(["全部", "高校", "央国企", "企业", "其他"]);
+  it("sector tabs 覆盖 全部/高校/医院/央国企/企业/其他（V0.3.2）", () => {
+    expect(SECTOR_TABS.map((t) => t.label)).toEqual([
+      "全部", "高校", "医院", "央国企", "企业", "其他",
+    ]);
   });
 
-  it("sector badge 标签与色调正确", () => {
+  it("sector badge 标签与色调正确（含 hospital）", () => {
     expect(sectorLabel("university")).toBe("高校");
+    expect(sectorLabel("hospital")).toBe("医院");
     expect(sectorLabel("state_owned")).toBe("央国企");
     expect(sectorLabel("enterprise")).toBe("企业");
     expect(sectorLabel("mixed")).toBe("混合");
     expect(sectorLabel(null)).toBe("其他");   // 未知 -> 其他
     expect(sectorLabel("weird")).toBe("其他");
     expect(sectorTone("university")).toBe("blue");
+    expect(sectorTone("hospital")).toBe("green");
     expect(sectorTone("state_owned")).toBe("red");
     expect(sectorTone("enterprise")).toBe("amber");
     expect(sectorTone("mixed")).toBe("orange");
     expect(sectorTone("other")).toBe("zinc");
   });
 
-  it("run 结果按 sector 分组且顺序固定，未知归入其他", () => {
+  it("run 结果按 sector 分组且顺序固定（医院在高校后），未知归入其他", () => {
     const items = [
       { sector: "enterprise", source_name: "E" },
+      { sector: "hospital", source_name: "华西" },
       { sector: "university", source_name: "U1" },
       { sector: "university", source_name: "U2" },
       { sector: null, source_name: "X" },
       { sector: "mixed", source_name: "M" },
     ];
     const groups = groupRunItemsBySector(items);
-    expect(groups.map((g) => g.sector)).toEqual(["university", "enterprise", "mixed", "other"]);
+    expect(groups.map((g) => g.sector)).toEqual([
+      "university", "hospital", "enterprise", "mixed", "other",
+    ]);
     expect(groups[0].items.map((i) => i.source_name)).toEqual(["U1", "U2"]);
-    expect(groups[3].items.map((i) => i.source_name)).toEqual(["X"]);
+    expect(groups[1].items.map((i) => i.source_name)).toEqual(["华西"]);
+    expect(groups[4].items.map((i) => i.source_name)).toEqual(["X"]);
   });
 });
 

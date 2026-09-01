@@ -110,6 +110,10 @@ class HtmlListCollector(JobCollector):
             if not title_require_filter(title, require_words):
                 continue
             date_raw = self._extract_date_text(node, selectors)
+            # V0.3.2 require_date：无日期的条目不进 Inbox（导航/专题/无日期噪声）。
+            # 注意在标题过滤之后执行 —— 导航项大多已由标题过滤排除。
+            if self.source.require_date and not date_raw:
+                continue
 
             description = None
             if fetch_detail:

@@ -16,9 +16,11 @@ from app.core.config import CONFIG_DIR
 
 KNOWN_TYPES = {"json_api", "html_list"}
 
-# 来源/单位性质分类（V0.3）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
+# 来源/单位性质分类（V0.3 → V0.3.2）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
 # 与 JobCategory（岗位性质）正交。sector 是来源元数据，不是 AI 推断。
-ALLOWED_SECTORS = {"university", "state_owned", "enterprise", "mixed", "other"}
+# V0.3.2：hospital 从 other 升级为独立 sector（医院/医学中心/医疗机构是正式求职方向）。
+# 医院与高校不重复归类：即使医院是大学附属（华西/协和），招聘主体是医院 → hospital。
+ALLOWED_SECTORS = {"university", "hospital", "state_owned", "enterprise", "mixed", "other"}
 # mixed：一个 source 内可能同时包含多类单位，无法由 source 本身唯一决定 ——
 # 此时由 RawJob.sector_hint（能确定时）逐条覆盖。
 
@@ -88,6 +90,7 @@ class SourceConfig:
     detail: dict = field(default_factory=dict)
     mapping: dict = field(default_factory=dict)
     max_age_days: int | None = None
+    require_date: bool = False  # V0.3.2：列表页无日期条目不进 Inbox（排除导航/专题噪声）
     sector: str = "other"
     raw: dict = field(default_factory=dict)
 
@@ -151,6 +154,10 @@ def parse_source(raw: dict) -> SourceConfig:
         if not isinstance(max_age_days, int) or isinstance(max_age_days, bool) or max_age_days <= 0:
             raise SourceConfigError(f"[{source_id}] max_age_days 必须是正整数（天数）")
 
+    require_date = raw.get("require_date", False)
+    if not isinstance(require_date, bool):
+        raise SourceConfigError(f"[{source_id}] require_date 必须是 true/false")
+
     return SourceConfig(
         id=source_id,
         name=name,
@@ -167,6 +174,7 @@ def parse_source(raw: dict) -> SourceConfig:
         detail=raw.get("detail") or {},
         mapping=raw.get("mapping") or {},
         max_age_days=max_age_days,
+        require_date=require_date,
         sector=sector,
         raw=raw,
     )
