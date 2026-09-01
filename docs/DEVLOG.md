@@ -1373,3 +1373,49 @@ recruit.html 404 → 候选）、山东大学（连接失败）、湖南大学�
   （tabs 顺序含医院、badge 标签/色调、分组顺序）；ruff / secret scan 全绿。
 - 真实冒烟：8 源全 success 0 失败；新增 15 条（山大 1 / 华西 9 / 烟草 5），
   sector 分布 university 26 / hospital 9 / state_owned 9。
+
+## V0.3.3 — 跨学科来源扩展 + Coverage-first 相关性优化（2026-09-01）
+
+目标画像修正：生物学博士、荧光探针/分子探针研究方向、化学-生物交叉（化学生物学/
+生物成像/生物分析/分子诊断/药物发现/转化医学）。原则：提高 recall 优先于 precision，
+Collector 是发现雷达，AI extraction 与用户确认负责后续判断。研究方向不进入 sector/
+JobCategory（sector 只回答单位性质；domain_tags 记为 V0.4 candidate，本轮不做 migration）。
+
+**research_institute 独立 sector**：sector 集合扩展为 university/research_institute/
+hospital/state_owned/enterprise/mixed/other；前端 tab（全部|高校|科研院所|医院|央国企|
+企业|其他）+ violet badge tone（Badge 组件新增）+ 分组顺序（高校→科研院所→医院→央国企→
+企业→混合→其他）。Organization.organization_type 已支持 research_institute，直接复用。
+
+**Coverage-first 过滤调优**：各源 include 词表按跨学科画像放宽（生物/成像/分析/诊断/
+药物/细胞/蛋白/免疫/肿瘤/转化/生命 等加入高校与院所源）；综合招聘公告（高层次人才/
+年度招聘/博士后招收）即使标题无专业词也保留；噪声（拟聘/公示/资格复审/解聘/辅导员/
+行政/保卫…）继续过滤。不同 source 保持独立词表，不建全局大词表。
+
+**Collector 增强**：request.verify_ssl（逐源显式关闭 TLS 校验，仅 ic.cas.cn 证书异常
+使用；SSRF 边界不受影响）；request.user_agent 逐源覆盖（南开/国药需浏览器 UA）。
+
+### 新增 ENABLED 来源（真实抓取验证，完整 run #5：15 源 0 失败）
+
+| source | sector | raw | new | filt | rec | 样例 |
+|---|---|---|---|---|---|---|
+| cemcs_research 分子细胞卓越中心研究组 | research_institute | 15 | 14(首轮) | 0 | 0 | 陈飞组招聘特别研究助理/博士后 |
+| iccas_recruit 中科院化学所人才招聘 | research_institute | 15 | 8 | 1 | 1 | 交叉研究中心杨驰远课题组博士后和项目聘用人员招聘启事 |
+| simm_research 上海药物所科研岗位 | research_institute | 10 | 7(首轮) | 0 | 0 | 张乃霞课题组特别研究助理招聘启事 |
+| sxicc_gcc 山西煤化所高层次人才 | research_institute | 6 | 4(首轮) | 1 | 1 | 2026-2027年度科研人员第一次招聘启事 |
+| sxicc_bsh 山西煤化所博士后 | research_institute | 1 | 1(首轮) | 0 | 0 | 博士后招聘启事 |
+| nankai_faculty 南开大学人事处 | university | 11 | 4 | 1 | 4 | 2026年人才引进、教职工公开招聘、博士后招收公告 |
+| sinopharm_recruit 中国医药集团招聘公告 | state_owned | 8 | 12(首轮) | 2 | 0 | 全球高层次人才招聘公告（列表无日期，无法 recency） |
+
+**UNSUPPORTED（如实报告）**：生物物理所 ibp.cas.cn/zp（JS）、国家纳米中心（无招聘栏目）、
+杭州医学所（列表 JS）、复旦中山（521 WAF）、浙大一院（Struts JS）、北大人民/瑞金（JS）、
+厦大/浙大（非稳定静态）、企业组 13 家（康方/君实/荣昌/信达/百济/再鼎/恒瑞/药明康德/
+药明生物/石药/复星/凯莱英/新产业/安图 —— 均为 JS 应用或 hotjob 等第三方系统，
+企业组后续需要 JS 渲染型 collector，V0.3.4 candidate，本轮不引入 Chromium）。
+
+### 验证
+
+- 测试：pytest **276 passed**（+6：research_institute 解析/持久化/API 筛选、
+  verify_ssl 校验、relevance 回归 5 保留 + 5 过滤 fixture）；vitest 32（tabs/
+  badge/分组含科研院所）；ruff / secret scan 全绿。
+- 完整 run #5：sources=15 completed=15 failed=0；new=12 dup=91 possible=7
+  filtered=64 recency=22。

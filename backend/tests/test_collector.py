@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app.collectors.config import SourceConfig, parse_source
+from app.collectors.config import SourceConfig, keyword_filter_passes, parse_source
 from app.collectors.html_list import HtmlListCollector
 from app.collectors.json_api import JsonApiCollector
 from app.services.collector_dedupe import canonical_url, fingerprint, possible_duplicate_reason
@@ -1114,3 +1114,111 @@ def test_discovered_jobs_hospital_filter(client, db_session):
     assert r["items"][0]["sector"] == "hospital"
     r2 = client.get("/api/discovered-jobs?sector=university").json()
     assert r2["total"] == 1 and r2["items"][0]["sector"] == "university"
+# ---------- V0.3.3 research_institute sector + relevance 回归 ----------
+
+def test_parse_source_sector_research_institute():
+    src = parse_source({"id": "r", "name": "R", "type": "json_api", "enabled": True,
+                        "url": "https://x", "sector": "research_institute"})
+    assert src.sector == "research_institute"
+
+
+def test_parse_source_request_verify_ssl_validated():
+    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                        "url": "https://x", "request": {"verify_ssl": False}})
+    assert src.request.verify_ssl is False
+    with pytest.raises(Exception, match="verify_ssl"):
+        parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                      "url": "https://x", "request": {"verify_ssl": "no"}})
+
+
+def test_runner_persists_research_institute_sector(client, db_session, monkeypatch):
+    """source.sector=research_institute → DiscoveredJob.sector 同样。"""
+    from app.models import DiscoveredJob
+    from app.services.collector_runner import run_collectors
+
+    def mk(title, url, job_id):
+        from app.collectors.base import RawJob
+
+        return RawJob(source_id="R", source_name="R", title=title,
+                      source_job_id=job_id, source_url=url,
+                      organization_hint="中国科学院分子细胞科学卓越创新中心")
+
+    _fake_collector(monkeypatch, {"R": [mk("研究组招聘特别研究助理", "https://r.com/1", "r1")]})
+    src = SourceConfig(id="R", name="分子细胞", type="json_api", enabled=True,
+                       url="https://r", sector="research_institute")
+    run = run_collectors(db_session, [src])
+    db_session.commit()
+    row = db_session.query(DiscoveredJob).one()
+    assert row.sector == "research_institute"
+    assert run.items[0].sector == "research_institute"
+
+
+def test_discovered_jobs_research_institute_filter(client, db_session):
+    """GET /discovered-jobs?sector=research_institute 只返回科研院所。"""
+    from app.models import DiscoveredJob
+
+    db_session.add_all([
+        DiscoveredJob(source_id="cemcs", source_name="分子细胞", sector="research_institute",
+                      source_url="https://c/1", title_raw="特别研究助理招聘", status="new"),
+        DiscoveredJob(source_id="u", source_name="高校", sector="university",
+                      source_url="https://u/1", title_raw="教师招聘", status="new"),
+    ])
+    db_session.commit()
+    r = client.get("/api/discovered-jobs?sector=research_institute").json()
+    assert r["total"] == 1
+    assert r["items"][0]["sector"] == "research_institute"
+
+
+# ---------- V0.3.3 relevance 回归：coverage-first 词表 ----------
+
+def _filters(include, exclude):
+    return {"include_keywords": include, "exclude_keywords": exclude}
+
+
+UNIV_FILTERS = _filters(
+    ["招聘", "人才", "引进", "博士后", "招收", "科研", "研究", "助理", "教师", "教授", "研究员",
+     "化学", "药学", "生物", "医学", "材料", "博士", "细胞", "蛋白", "免疫", "成像", "分析",
+     "诊断", "药物", "肿瘤", "转化", "生命"],
+    ["拟聘", "公示", "成绩", "面试", "资格审查", "资格复审", "体检", "考察", "递补",
+     "辅导员", "管理岗位", "保卫", "后勤"],
+)
+INST_FILTERS = _filters(
+    ["招聘", "启事", "人才", "引进", "博士后", "特别研究助理", "科研", "研究", "研究员",
+     "化学生物学", "生物", "化学", "药学", "药物", "成像", "分析", "检验", "诊断",
+     "材料", "功能分子", "细胞", "蛋白"],
+    ["拟录用", "拟聘", "公示", "名单", "成绩", "笔试", "面试", "资格审查", "资格复审",
+     "体检", "考察", "递补", "辅导员", "行政", "财务", "保卫", "后勤"],
+)
+ENTERPRISE_FILTERS = _filters(
+    ["研发", "科学家", "研究员", "药物发现", "生物分析", "成像", "诊断", "化学生物学",
+     "生物", "化学", "药学", "医学", "博士", "博士后", "研究"],
+    ["拟录用", "公示", "名单", "成绩", "面试", "体检", "考察", "递补", "行政", "后勤", "司机"],
+)
+
+
+def test_relevance_must_keep_cross_disciplinary_titles():
+    """明确不允许漏掉的岗位（即使无"化学"字样也必须保留）。"""
+    keep_cases = [
+        ("活细胞荧光成像方向博士后招聘", UNIV_FILTERS),
+        ("化学生物学与分子探针方向特别研究助理招聘", INST_FILTERS),
+        ("生物传感与分子诊断研发科学家", ENTERPRISE_FILTERS),
+        ("2027年度高层次人才招聘公告", UNIV_FILTERS),
+        ("分子影像探针课题组招聘科研助理", INST_FILTERS),
+    ]
+    for title, filters in keep_cases:
+        keep, _ = keyword_filter_passes(title, filters, "t")
+        assert keep, f"必须保留: {title}"
+
+
+def test_relevance_must_filter_noise_titles():
+    """噪声必须继续过滤。"""
+    drop_cases = [
+        ("拟聘人员名单公示", UNIV_FILTERS),
+        ("资格复审通知", UNIV_FILTERS),
+        ("辅导员招聘", UNIV_FILTERS),
+        ("2026年公开招聘面试成绩公告", INST_FILTERS),
+        ("拟录用人员公示", ENTERPRISE_FILTERS),
+    ]
+    for title, filters in drop_cases:
+        keep, _ = keyword_filter_passes(title, filters, "t")
+        assert not keep, f"必须过滤: {title}"
