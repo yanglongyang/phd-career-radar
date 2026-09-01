@@ -1,11 +1,15 @@
-# 招聘信息来源配置（V0.2 Collector MVP + V0.3 sector）
+# 招聘信息来源配置（V0.2 Collector MVP + V0.3 sector + V0.3.2 hospital）
 # CollectorRegistry/runner 读取 enabled 清单；真实爬虫仅 JsonApiCollector / HtmlListCollector。
 # 关键词过滤为确定性 pre-filter；title_require_words 过滤混入列表页的导航/新闻动态；
-# max_age_days 按列表发布日期跳过过期旧岗位（很多高校列表页新旧混排，2023/2016 的都有）。
+# max_age_days 按列表发布日期跳过过期旧岗位（很多高校列表页新旧混排，2023/2016 的都有）；
+# require_date=true 时列表条目必须有发布日期才进 Inbox（排除导航/专题等无日期噪声）。
 #
-# sector（V0.3）：来源/单位性质分类 —— university / state_owned / enterprise / mixed / other。
+# sector（V0.3 / V0.3.2）：来源/单位性质分类 ——
+#   university / hospital / state_owned / enterprise / mixed / other。
 #   - 回答"这个岗位来自什么性质的用人单位/招聘来源"，与 JobCategory（岗位性质）正交；
 #   - 是来源元数据，不是 AI 推断；发现时冻结到 DiscoveredJob.sector，之后改配置不回溯历史；
+#   - hospital 是独立 sector（医院/医学中心/医疗机构）：大学附属医院（华西/协和等）
+#     招聘主体是医院 → hospital，不归入 university；
 #   - mixed：一个 source 内可能同时包含多类单位，由 RawJob.sector_hint 逐条确定时覆盖；
 #   - 聚合来源的 organization 留空（来源机构 ≠ 招聘单位），由每条材料自行提供。
 # category 为 legacy alias（兼容读取，旧配置 category: university 不报错）；新配置统一写 sector。
@@ -15,6 +19,29 @@ schema_version: 2
 
 collectors:
   # ---- 高校（university）----
+  - id: sxu_faculty
+    name: 山西大学教师招聘
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 山西大学
+    url: https://rsc.sxu.edu.cn/gkzp/jszpzp/index.htm
+    request:
+      timeout_seconds: 20
+    max_age_days: 365
+    require_date: true   # 导航子菜单（教师招聘/博士后招聘…）无日期 span，直接排除
+    selectors:
+      item: "ul li"
+      title: "a"
+      link: "a"
+      date: "span"
+      title_require_words: [招聘, 诚聘, 教师, 教授, 岗位, 人才, 引进, 博士后, 研究员]
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [化学, 药学, 生物, 医学, 材料, 教师, 教授, 研究员, 博士后, 人才, 博士]
+      exclude_keywords: [拟聘, 公示, 成绩, 面试, 资格审查, 资格复审, 体检, 考察, 递补, 辅导员, 管理岗位]
+
   - id: sjtu_postdoc
     name: 上海交通大学博士后招聘
     type: html_list
@@ -106,6 +133,33 @@ collectors:
       include_keywords: [化学, 药学, 生物, 医学, 材料, 教师, 教授, 研究员, 博士后, 人才]
       exclude_keywords: [辅导员, 行政, 值班, 公示, 面试名单, 名单, 请点此查看]
 
+  # ---- 医院（hospital）----
+  # 大学附属医院（华西等）招聘主体是医院 → sector=hospital，不归入 university。
+  - id: west_china_hospital
+    name: 四川大学华西医院招聘
+    type: html_list
+    enabled: true
+    sector: hospital
+    organization: 四川大学华西医院
+    url: https://www.wchscu.cn/public/notice/recruit.html
+    request:
+      timeout_seconds: 20
+    max_age_days: 365
+    selectors:
+      # 列表：<div class="item"><a><span class="s1">标题</span><span class="s2">2026.01.28</span></a></div>
+      item: "div.list div.item"
+      title: "a span.s1"
+      link: "a"
+      date: "span.s2"
+      title_require_words: [招聘, 启事, 博士后, 科研, 助理, 研究员, 人才, 博士, 药师, 药学, 药物, 分析, 检验, 技师]
+    detail:
+      fetch_detail: false
+    filters:
+      # 医院 include 保持宽口径：综合公告（如"2026年应届毕业生招聘公告"）即使标题无
+      # 具体专业也必须保留（科研岗位可能只在正文/附件里）。
+      include_keywords: [招聘, 启事, 公告, 博士后, 科研, 研究, 助理, 人才, 博士, 药师, 药学, 药物, 分析, 检验, 生物, 化学, 材料, 医学工程, 技师]
+      exclude_keywords: [拟录用, 拟聘, 名单, 公示, 成绩, 笔试, 面试, 资格审查, 资格复审, 体检, 考察, 递补, 护理, 保安, 后勤, 收费, 司机]
+
   # ---- 央国企（state_owned）----
   - id: sasac_recruit
     name: 国务院国资委招聘栏目
@@ -131,7 +185,30 @@ collectors:
       include_keywords: [化学, 药学, 生物, 材料, 医药, 化工, 博士, 研发, 研究]
       exclude_keywords: [专题, 任免, 公示, 领导人员]
 
-  # ---- 已禁用来源（unsupported / 结构不可用）----
+  - id: tobacco_recruit
+    name: 中国烟草招聘信息
+    type: html_list
+    enabled: true
+    sector: state_owned
+    organization: null   # 聚合来源：各省烟草专卖局 / 中烟工业公司
+    url: http://www.tobacco.gov.cn/gjyc/zpxx/list.shtml
+    request:
+      timeout_seconds: 20
+    max_age_days: 365
+    require_date: true   # 页面含领导介绍等无日期条目
+    selectors:
+      item: "ul li"
+      title: "a"
+      link: "a"
+      date: "span"
+      title_require_words: [招聘, 录用, 公告, 引进]
+    detail:
+      fetch_detail: false
+    filters:
+      include_keywords: [招聘, 公告, 引进, 博士, 高层次, 人才, 研发, 研究, 化学, 分析, 检验]
+      exclude_keywords: [拟录用, 拟聘, 公示, 名单, 成绩, 面试, 体检, 考察, 递补]
+
+  # ---- 已禁用来源（unsupported / 结构不可用 / 候选）----
   # 复旦大学 hr.fudan.edu.cn/15360/list.htm：列表为 JS 渲染/菜单结构，静态解析无公告条目
   # 南京大学 hr.nju.edu.cn：页面 JS 渲染，静态抓取无内容
   # 中科院化学所 www.ic.cas.cn/rcjy/：栏目路径失效（404）
@@ -141,6 +218,16 @@ collectors:
   # 中科院上海有机所 sioc.ac.cn/rcjy/rczp：页面结构特殊，静态解析无列表项
   # 中国公共招聘网 www.job.mohrss.gov.cn：岗位列表 JS 渲染（仅静态表单），静态不可用
   # 华海药业 zpgw.html（企业候选）：岗位表为猎聘聚合且数据停留在 2023 年，非公司官方列表
+  # 山西卫健委 wsjkw.shanxi.gov.cn：https 连接失败 / http 502，静态不可达
+  # 山西白求恩医院（山西医学科学院）www.sxbqeyy.com：502 / 连接失败，静态不可达
+  # 山西省人民医院 www.sxsrmyy.com：页面 JS 重定向（57B），无静态列表
+  # 北京协和医院 www.pumch.cn：招聘入口为 JS 应用，recruit.html 404 —— 记录为候选，
+  #   未来需要 JS 渲染型 collector 或单篇公告跟踪
+  # 山东大学 hr.sdu.edu.cn / 湖南大学 rsc.hnu.edu.cn / 郑州大学 rsc：列表结构非稳定静态
+  #   （连接失败 / 404 / 导航噪声），记录为候选
+  # 石药集团 cspc.com.cn / 复星医药 fosunpharma.com / 凯莱英 / 华海药业（企业组）：
+  #   官方 careers 均为 JS 应用或无静态列表 —— 企业组后续需要 JS 渲染型 collector
+  #   （如 Playwright），本轮不做浏览器自动化，企业 sector 仅保留架构
 
   - id: fudan_hr
     name: 复旦大学人事处

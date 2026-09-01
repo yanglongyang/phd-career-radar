@@ -1339,3 +1339,37 @@ PR 事件未触发属 GitHub 瞬时投递异常，非持续问题），合并后
 验证：dev DB 25 条 other → university（分布 university 25 / state_owned 4）；
 pytest **264 passed**（+2：迁移回填（已知源修正/未知保持/非 other 不覆盖）、
 启动函数幂等）；ruff / secret scan 全绿。
+
+## V0.3.2 — Hospital Sector + 山西大学（Source Expansion Wave 1，2026-09-01）
+
+**sector 扩展**：hospital 从 other 升级为独立 sector（医院/医学中心/医疗机构）。
+大学附属医院（华西等）招聘主体是医院 → hospital，不归入 university。
+改动最小化：ALLOWED_SECTORS + 前端 label/tone/tab/分组顺序（高校→医院→央国企→
+企业→混合→其他）。Organization.organization_type 已有 hospital，直接复用；
+V0.3.1 的 LEGACY_SECTOR_BACKFILL 未动，历史 other 数据不做自动猜测回填。
+
+**require_date 配置项**（html_list）：列表条目无发布日期时不进 Inbox ——
+排除导航/专题等无日期噪声（山西大学导航子菜单、烟草页领导介绍等）。
+只影响显式开启的 source，默认行为不变。
+
+**新增来源（真实抓取验证）**：
+
+| source | sector | 结果 |
+|---|---|---|
+| sxu_faculty 山西大学教师招聘（rsc.sxu.edu.cn/gkzp/jszpzp） | university | ✅ 专任教师/事业编制招聘公告；require_date 排除导航；公示类被关键词过滤 |
+| west_china_hospital 四川大学华西医院招聘（wchscu.cn/public/notice/recruit.html） | hospital | ✅ div.item 结构，9 条科研岗（博士后/科研助理/技师）全部带日期 |
+| tobacco_recruit 中国烟草招聘信息（tobacco.gov.cn/gjyc/zpxx） | state_owned | ✅ 5 条真实公告（含博士后科研工作站招收）；拟录用公示被排除 |
+
+**探测未接入（如实报告）**：山西卫健委（https 失败/http 502）、山西白求恩医院
+（502/连接失败）、山西省人民医院（JS 重定向 57B）、北京协和（招聘为 JS 应用，
+recruit.html 404 → 候选）、山东大学（连接失败）、湖南大学（404）、郑州大学
+（列表为导航噪声）、石药/复星/凯莱英/华海（企业 careers 均 JS/聚合 → 企业组
+后续需要 JS 渲染型 collector，本轮不做浏览器自动化）。
+
+### 验证
+
+- 测试：pytest **270 passed**（+6：hospital 解析/持久化/API 筛选、require_date
+  解析校验 + 跳过无日期 + 缺省行为、hospital run item）；vitest 32 passed
+  （tabs 顺序含医院、badge 标签/色调、分组顺序）；ruff / secret scan 全绿。
+- 真实冒烟：8 源全 success 0 失败；新增 15 条（山大 1 / 华西 9 / 烟草 5），
+  sector 分布 university 26 / hospital 9 / state_owned 9。

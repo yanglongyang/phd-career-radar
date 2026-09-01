@@ -1011,3 +1011,106 @@ def test_collector_sources_endpoint_emits_sector(client, monkeypatch):
     assert data["sources"][0]["sector"] == "university"
     assert data["sources"][0]["category"] == "university"  # legacy alias
     assert data["sources"][1]["sector"] == "state_owned"
+# ---------- V0.3.2 hospital sector + require_date ----------
+
+def test_parse_source_sector_hospital():
+    src = parse_source({"id": "h", "name": "H", "type": "json_api", "enabled": True,
+                        "url": "https://x", "sector": "hospital"})
+    assert src.sector == "hospital"
+
+
+def test_parse_source_require_date_validated():
+    src = parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                        "url": "https://x", "require_date": True})
+    assert src.require_date is True
+    with pytest.raises(Exception, match="require_date"):
+        parse_source({"id": "a", "name": "A", "type": "json_api", "enabled": True,
+                      "url": "https://x", "require_date": "yes"})
+
+
+def test_html_list_require_date_skips_dataless_items(monkeypatch):
+    """require_date=true：无日期条目不进 Inbox（导航/专题噪声），有日期保留。"""
+    html = """<html><body><ul>
+      <li><a href="/a/1.htm">教师招聘</a><span>2026/03/20</span></li>
+      <li><a href="/a/2.htm">杰出人才招聘</a></li>
+      <li><a href="/a/3.htm">博士后招聘</a><span>2026/05/04</span></li>
+    </ul></body></html>"""
+    src = SourceConfig(
+        id="sxu", name="山大", type="html_list", enabled=True,
+        url="https://rsc.sxu.edu.cn/gkzp/jszpzp/index.htm",
+        sector="university", require_date=True,
+        selectors={"item": "ul li", "title": "a", "link": "a", "date": "span",
+                   "title_require_words": ["招聘", "人才", "博士后"]},
+    )
+    collector = HtmlListCollector(src)
+
+    def fake_fetch(self, url, **kwargs):
+        return (src.url, "text/html", html)
+
+    monkeypatch.setattr(collector, "_fetcher", type("F", (), {"fetch": fake_fetch})())
+    jobs = collector.collect()
+    assert [j.title for j in jobs] == ["教师招聘", "博士后招聘"]  # 无日期条目被跳过
+    assert jobs[0].published_at_raw == "2026/03/20"
+
+
+def test_html_list_require_date_false_keeps_dataless(monkeypatch):
+    """require_date 缺省 false：无日期条目照常保留（原行为）。"""
+    html = """<html><body><ul>
+      <li><a href="/a/1.htm">教师招聘</a></li>
+    </ul></body></html>"""
+    src = SourceConfig(
+        id="sxu", name="山大", type="html_list", enabled=True,
+        url="https://rsc.sxu.edu.cn/", sector="university",
+        selectors={"item": "ul li", "title": "a", "link": "a", "date": "span",
+                   "title_require_words": ["招聘"]},
+    )
+    collector = HtmlListCollector(src)
+
+    def fake_fetch(self, url, **kwargs):
+        return (src.url, "text/html", html)
+
+    monkeypatch.setattr(collector, "_fetcher", type("F", (), {"fetch": fake_fetch})())
+    jobs = collector.collect()
+    assert [j.title for j in jobs] == ["教师招聘"]
+
+
+def test_runner_persists_hospital_sector(client, db_session, monkeypatch):
+    """source.sector=hospital → DiscoveredJob.sector=hospital；run item 同样。"""
+    from app.models import DiscoveredJob
+    from app.services.collector_runner import run_collectors
+
+    def mk(title, url, job_id):
+        from app.collectors.base import RawJob
+
+        return RawJob(source_id="H", source_name="H", title=title,
+                      source_job_id=job_id, source_url=url,
+                      organization_hint="四川大学华西医院")
+
+    _fake_collector(monkeypatch, {"H": [mk("专职博士后招聘启事", "https://h.com/1", "h1")]})
+    src = SourceConfig(id="H", name="华西", type="json_api", enabled=True,
+                       url="https://h", sector="hospital")
+    run = run_collectors(db_session, [src])
+    db_session.commit()
+    row = db_session.query(DiscoveredJob).one()
+    assert row.sector == "hospital"
+    assert run.items[0].sector == "hospital"
+
+
+def test_discovered_jobs_hospital_filter(client, db_session):
+    """GET /discovered-jobs?sector=hospital 只返回医院；其他 sector 不回归。"""
+    from app.models import DiscoveredJob
+
+    db_session.add_all([
+        DiscoveredJob(source_id="wch", source_name="华西", sector="hospital",
+                      source_url="https://w/1", title_raw="博士后招聘", status="new"),
+        DiscoveredJob(source_id="u", source_name="高校", sector="university",
+                      source_url="https://u/1", title_raw="教师招聘", status="new"),
+        DiscoveredJob(source_id="s", source_name="国资委", sector="state_owned",
+                      source_url="https://s/1", title_raw="央企招聘", status="new"),
+    ])
+    db_session.commit()
+    r = client.get("/api/discovered-jobs?sector=hospital").json()
+    assert r["total"] == 1
+    assert r["items"][0]["sector"] == "hospital"
+    r2 = client.get("/api/discovered-jobs?sector=university").json()
+    assert r2["total"] == 1 and r2["items"][0]["sector"] == "university"
