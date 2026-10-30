@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from app.collectors.base import JobCollector
 from app.collectors.config import SourceConfig
+from app.collectors.html_detail import HtmlDetailCollector
 from app.collectors.html_list import HtmlListCollector
 from app.collectors.json_api import JsonApiCollector
 
 _COLLECTOR_TYPES: dict[str, type[JobCollector]] = {
     "json_api": JsonApiCollector,
     "html_list": HtmlListCollector,
+    "html_detail": HtmlDetailCollector,
 }
 
 

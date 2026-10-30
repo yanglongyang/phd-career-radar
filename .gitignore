@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 backend/.venv/
+.venv/
 *.egg-info/
 
 # Node
@@ -15,6 +16,7 @@ frontend/dist/
 .env
 data/*.db
 data/*.pid
+data/*.lock
 data/*.db-journal
 data/*.sqlite3
 data/llm_secret.bin

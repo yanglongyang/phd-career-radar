@@ -10,12 +10,24 @@ DiscoveredStatusLiteral = Literal[
 ]
 
 
+class CollectorRunRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    mode: Literal["recent", "history"] = "recent"
+    history_years: int = Field(default=3, ge=1, le=10, strict=True)
+    province: str | None = Field(default=None, max_length=32)
+    source_ids: list[str] | None = Field(default=None, max_length=200)
+
+
 class CollectorRunSummary(BaseModel):
     id: int
     status: str
     started_at: datetime
     finished_at: datetime | None
     trigger: str
+    mode: str = "recent"
+    history_years: int | None = None
+    province: str | None = None
     source_count: int
     completed_source_count: int
     discovered_count: int
@@ -42,6 +54,7 @@ class CollectorRunItemOut(BaseModel):
     filtered_count: int
     recency_skipped_count: int
     error_message: str | None = None
+    warning_count: int = 0
 
 
 class CollectorRunOut(CollectorRunSummary):
@@ -59,6 +72,11 @@ class DiscoveredJobOut(BaseModel):
     title_raw: str | None = None
     description_raw: str | None = None
     published_at_raw: str | None = None
+    announcement_year: int | None = None
+    reference_status: Literal["historical", "current_year", "upcoming", "unknown"] = "unknown"
+    province: str | None = None
+    requirements_summary: str | None = None
+    benefits_summary: str | None = None
     organization_hint: str | None = None
     location_hint: str | None = None
     status: str

@@ -14,7 +14,7 @@ import yaml
 
 from app.core.config import CONFIG_DIR
 
-KNOWN_TYPES = {"json_api", "html_list"}
+KNOWN_TYPES = {"json_api", "html_list", "html_detail"}
 
 # 来源/单位性质分类（V0.3 → V0.3.3）：回答"这个岗位来自什么性质的用人单位/招聘来源"，
 # 与 JobCategory（岗位性质）正交。sector 是来源元数据，不是 AI 推断。
@@ -31,6 +31,14 @@ ALLOWED_SECTORS = {
 # 列表页日期格式多种多样（2026.08.24 / 2023-07-05 / 发布日期：2016-11-29 / 2025年9月8日），
 # 统一按"第一个完整日期"提取；用于 max_age_days 过期岗位过滤。
 _DATE_PATTERN = re.compile(r"(?P<y>\d{4})[-/.年](?P<m>\d{1,2})[-/.月](?P<d>\d{1,2})日?")
+_ENGLISH_DATE_PATTERN = re.compile(
+    r"\b(?P<m>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\.?\s+(?P<d>\d{1,2}),?\s+(?P<y>\d{4})\b", re.I,
+)
+_MONTH_NUMBERS = {name: i for i, name in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1
+)}
 
 
 def extract_date_text(raw: str | None) -> str | None:
@@ -38,7 +46,12 @@ def extract_date_text(raw: str | None) -> str | None:
     if not raw:
         return None
     m = _DATE_PATTERN.search(raw)
-    return m.group(0) if m else None
+    if m:
+        return m.group(0)
+    # A few official university recruitment systems emit English month names,
+    # e.g. '发布时间：Sep 29, 2024 5:09:20 PM'. Normalize only the date portion.
+    parsed = parse_date_from_text(raw)
+    return parsed.isoformat() if parsed else None
 
 
 def parse_date_from_text(raw: str | None) -> date | None:
@@ -49,7 +62,14 @@ def parse_date_from_text(raw: str | None) -> date | None:
         return None
     m = _DATE_PATTERN.search(raw)
     if not m:
-        return None
+        english = _ENGLISH_DATE_PATTERN.search(raw)
+        if not english:
+            return None
+        try:
+            return date(int(english.group("y")), _MONTH_NUMBERS[english.group("m")[:3].lower()],
+                        int(english.group("d")))
+        except ValueError:
+            return None
     try:
         return date(int(m.group("y")), int(m.group("m")), int(m.group("d")))
     except ValueError:
@@ -97,6 +117,11 @@ class SourceConfig:
     require_date: bool = False  # V0.3.2：列表页无日期条目不进 Inbox（排除导航/专题噪声）
     sector: str = "other"
     raw: dict = field(default_factory=dict)
+    province: str | None = None
+    location: str | None = None
+    pagination: dict = field(default_factory=dict)
+    history: dict = field(default_factory=dict)
+    scope: str = "recent"  # runtime only; runner selects recent/history
 
     @property
     def category(self) -> str:
@@ -137,7 +162,7 @@ def parse_source(raw: dict) -> SourceConfig:
     if not isinstance(filters, dict):
         raise SourceConfigError(f"[{source_id}] filters 必须是对象")
 
-    for key in ("selectors", "detail", "mapping"):
+    for key in ("selectors", "detail", "mapping", "pagination", "history"):
         value = raw.get(key)
         if value is not None and not isinstance(value, dict):
             raise SourceConfigError(f"[{source_id}] {key} 必须是对象")
@@ -162,6 +187,60 @@ def parse_source(raw: dict) -> SourceConfig:
     if not isinstance(require_date, bool):
         raise SourceConfigError(f"[{source_id}] require_date 必须是 true/false")
 
+    for key in ("province", "location"):
+        if raw.get(key) is not None and not isinstance(raw[key], str):
+            raise SourceConfigError(f"[{source_id}] {key} 必须是字符串")
+    pagination = raw.get("pagination") or {}
+    history = raw.get("history") or {}
+    detail = raw.get("detail") or {}
+    for group, values in (("pagination", pagination), ("history", history)):
+        for key, limit in (("max_pages", 100), ("max_items", 1000), ("years", 10)):
+            if key in values and (
+                not isinstance(values[key], int) or isinstance(values[key], bool)
+                or not 1 <= values[key] <= limit
+            ):
+                raise SourceConfigError(f"[{source_id}] {group}.{key} 必须是 1–{limit} 的整数")
+    for key in ("enabled", "only"):
+        if key in history and not isinstance(history[key], bool):
+            raise SourceConfigError(f"[{source_id}] history.{key} 必须是 true/false")
+    if "fetch_detail" in detail and not isinstance(detail["fetch_detail"], bool):
+        raise SourceConfigError(f"[{source_id}] detail.fetch_detail 必须是 true/false")
+    for key in ("next_selector", "url_template"):
+        if key in pagination and not isinstance(pagination[key], str):
+            raise SourceConfigError(f"[{source_id}] pagination.{key} 必须是字符串")
+    template = pagination.get("url_template")
+    if template and ("{page}" not in template or "{" in template.replace("{page}", "")
+                     or "}" in template.replace("{page}", "")):
+        raise SourceConfigError(f"[{source_id}] pagination.url_template 只能包含 {{page}} 占位符")
+    start_page = pagination.get("start_page", 1)
+    if not isinstance(start_page, int) or isinstance(start_page, bool) or not 0 <= start_page <= 1000:
+        raise SourceConfigError(f"[{source_id}] pagination.start_page 必须是 0–1000 的整数")
+    next_text = pagination.get("next_text")
+    if next_text is not None and not (
+        isinstance(next_text, str)
+        or isinstance(next_text, list) and all(isinstance(t, str) for t in next_text)
+    ):
+        raise SourceConfigError(f"[{source_id}] pagination.next_text 必须是字符串或字符串列表")
+    max_bytes = request_raw.get("max_bytes", 5 * 1024 * 1024)
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= 20 * 1024 * 1024:
+        raise SourceConfigError(f"[{source_id}] request.max_bytes 必须是 1–20971520 的整数")
+    seeds = raw.get("seeds")
+    if seeds is not None:
+        if not isinstance(seeds, list) or len(seeds) > 1000:
+            raise SourceConfigError(f"[{source_id}] seeds 必须是最多 1000 项的列表")
+        for seed in seeds:
+            if not isinstance(seed, dict) or not isinstance(seed.get("url"), str):
+                raise SourceConfigError(f"[{source_id}] seeds 每项必须含 url 字符串")
+            if not seed["url"].startswith(("https://", "http://")):
+                raise SourceConfigError(f"[{source_id}] seed.url 仅支持 http/https")
+            for key in ("title", "published_at", "organization"):
+                if seed.get(key) is not None and not isinstance(seed[key], str):
+                    raise SourceConfigError(f"[{source_id}] seed.{key} 必须是字符串")
+            if seed.get("sector") is not None and (
+                not isinstance(seed["sector"], str) or seed["sector"] not in ALLOWED_SECTORS
+            ):
+                raise SourceConfigError(f"[{source_id}] seed.sector 无效")
+
     return SourceConfig(
         id=source_id,
         name=name,
@@ -172,6 +251,7 @@ def parse_source(raw: dict) -> SourceConfig:
         request=RequestConfig(
             timeout_seconds=float(timeout),
             user_agent=str(request_raw.get("user_agent", "phd-career-radar/0.2")),
+            max_bytes=max_bytes,
         ),
         filters=filters,
         selectors=raw.get("selectors") or {},
@@ -180,6 +260,10 @@ def parse_source(raw: dict) -> SourceConfig:
         max_age_days=max_age_days,
         require_date=require_date,
         sector=sector,
+        province=raw.get("province"),
+        location=raw.get("location"),
+        pagination=pagination,
+        history=history,
         raw=raw,
     )
 
@@ -192,7 +276,26 @@ def _read_sources_yaml() -> dict:
         return {}
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return data or {}
+    data = data or {}
+    # New bundled sources are additive. A user override (including enabled:false)
+    # always wins. An explicitly empty versioned list remains truly empty.
+    originals = data.get("collectors")
+    supplement = CONFIG_DIR / "sources_shanxi.yaml"
+    if (data.get("include_shanxi", True) is False or not supplement.exists()
+            or not isinstance(originals, list) or not originals):
+        return data
+    with supplement.open("r", encoding="utf-8") as f:
+        extra = yaml.safe_load(f) or {}
+    additions = extra.get("collectors", [])
+    if not isinstance(additions, list):
+        additions = [{"id": "shanxi_sources_invalid", "name": "山西来源包配置错误"}]
+    existing_ids = {str(item.get("id", "")) for item in originals if isinstance(item, dict)}
+    data["collectors"] = originals + [
+        {**item, "sources_file": "sources_shanxi.yaml"} if isinstance(item, dict) else item
+        for item in additions
+        if not isinstance(item, dict) or str(item.get("id", "")) not in existing_ids
+    ]
+    return data
 
 
 def _raw_sector_hint(item) -> str:

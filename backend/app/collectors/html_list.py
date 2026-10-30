@@ -1,25 +1,26 @@
-"""HtmlListCollector（V0.2）：selector 驱动的传统高校/研究院 CMS 列表页。
-
-- selector 全部来自 sources.yaml（item/title/link/date/content）；
-- 相对 URL resolve；
-- detail.fetch_detail=false 时只保存列表页信息；
-- 单条 detail 失败不导致整个 source 失败（跳过该条并计数）。
-"""
+"""Bounded, same-origin pagination for traditional public recruitment lists."""
 
 from __future__ import annotations
 
 import re
-from urllib.parse import urljoin
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
 from app.collectors.base import JobCollector, RawJob
-from app.collectors.config import (
-    SourceConfig,
-    extract_date_text,
-    title_require_filter,
+from app.collectors.config import SourceConfig, extract_date_text, title_require_filter
+from app.collectors.html_detail import (
+    outside_history_window,
+    public_link,
+    read_article,
+    reconcile_article_metadata,
 )
 from app.collectors.http import SafeFetcher
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlsplit(url)
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port
 
 
 class HtmlListCollector(JobCollector):
@@ -27,6 +28,9 @@ class HtmlListCollector(JobCollector):
 
     def __init__(self, source: SourceConfig):
         self.source = source
+        self.warnings: list[str] = []
+        self.prefiltered_count = 0
+        self.recency_prefiltered_count = 0
         self._fetcher = SafeFetcher(
             user_agent=source.request.user_agent, max_bytes=source.request.max_bytes
         )
@@ -35,114 +39,167 @@ class HtmlListCollector(JobCollector):
         return BeautifulSoup(body, "html.parser")
 
     def _select_text(self, node, selector: str) -> str | None:
-        if not selector:
-            return None
         target = node.select_one(selector) if selector else None
-        if target is None:
-            return None
-        return target.get_text(strip=True) or None
+        return target.get_text(" ", strip=True) or None if target is not None else None
 
     def _select_attr(self, node, selector: str, attr: str) -> str | None:
-        if not selector:
-            return None
         target = node.select_one(selector) if selector else None
-        if target is None:
-            return None
-        value = target.get(attr)
-        return value if value else None
-
-    def _clean_text(self, html: str) -> str:
-        text = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", "", html, flags=re.I | re.S)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        value = target.get(attr) if target is not None else None
+        return value if isinstance(value, str) and value else None
 
     def _extract_date_text(self, node, selectors: dict) -> str | None:
-        """从列表行提取发布日期的原始文本（仅取匹配到的日期串，便于展示）。
-
-        - date 选择器存在：取其文本，或 date_attr 指定的属性（北大日期在 title 属性里）；
-        - date 选择器缺失/取不到：扫描整行文本（华科日期嵌在 li 文本末尾）。"""
         date_selector = selectors.get("date") or ""
         date_attr = selectors.get("date_attr") or ""
-        raw: str | None = None
+        raw = None
         if date_selector:
             target = node.select_one(date_selector)
             if target is not None:
                 raw = target.get(date_attr) if date_attr else target.get_text(strip=True)
-        if not raw:
-            raw = node.get_text(strip=True)
-        if not raw:
-            return None
-        return extract_date_text(raw)
+        return extract_date_text(raw or node.get_text(" ", strip=True))
+
+    def _next_page(self, soup: BeautifulSoup, url: str, body: str, page_index: int) -> str | None:
+        config = self.source.pagination
+        selector = config.get("next_selector")
+        anchor = soup.select_one(selector) if selector else None
+        if anchor is None:
+            labels = config.get("next_text", ["下一页", "下页", "next", "next page"])
+            labels = [labels] if isinstance(labels, str) else labels
+            labels = {text.strip().lower() for text in labels}
+            anchor = next((a for a in soup.select("a[href]") if a.get_text(" ", strip=True).lower() in labels), None)
+        href = anchor.get("href") if anchor is not None else None
+        if href and not href.strip().startswith(("#", "javascript:")):
+            return public_link(url, href)
+        template = config.get("url_template")
+        if template:
+            # TRS government sites emit pagination through document.write. Reading
+            # this numeric count avoids nonexistent pages; no JavaScript executes.
+            count = re.search(r"\b(?:countPage|totalPages)\s*=\s*[\"']?(\d+)", body)
+            if count and page_index + 1 >= int(count.group(1)):
+                return None
+            page_number = config.get("start_page", 1) + page_index
+            return public_link(url, template.replace("{page}", str(page_number)))
+        return None
 
     def collect(self) -> list[RawJob]:
+        self.warnings = []
+        self.prefiltered_count = 0
+        self.recency_prefiltered_count = 0
         selectors = self.source.selectors
         item_selector = selectors.get("item")
         if not item_selector:
             raise ValueError(f"[{self.source.id}] selectors.item 缺失")
-
-        # cleanup 10：一次 GET 拿回 body，直接解析（不再重复请求列表页）
-        final_url, _, body = self._fetcher.fetch(
-            self.source.url,
-            timeout=self.source.request.timeout_seconds,
-            content_types=("html", "text"),
-        )
-        soup = self._soup_from_body(body)
-        items = soup.select(item_selector)
-        if not items:
-            return []
-
-        detail_config = self.source.detail or {}
-        fetch_detail = bool(detail_config.get("fetch_detail", False))
-        content_selector = detail_config.get("content_selector", "")
-
+        limits = dict(self.source.pagination)
+        if self.source.scope == "history":
+            limits.update(self.source.history)
+        max_pages = limits.get("max_pages", 1)
+        max_items = limits.get("max_items", 100)
+        fetch_detail = self.source.detail.get("fetch_detail", False)
         results: list[RawJob] = []
-        require_words = selectors.get("title_require_words")
-        for node in items:
-            href = self._select_attr(node, selectors.get("link") or "a", "href")
-            if not href:
-                continue
-            url = urljoin(final_url, href)
-            title = self._select_text(node, selectors.get("title") or "a")
-            if not title:
-                continue
-            # 标题特征过滤：列表页可能混入导航/新闻，标题不含招聘特征词则跳过
-            if not title_require_filter(title, require_words):
-                continue
-            date_raw = self._extract_date_text(node, selectors)
-            # V0.3.2 require_date：无日期的条目不进 Inbox（导航/专题/无日期噪声）。
-            # 注意在标题过滤之后执行 —— 导航项大多已由标题过滤排除。
-            if self.source.require_date and not date_raw:
-                continue
+        pages_seen: set[str] = set()
+        jobs_seen: set[str] = set()
+        current = self.source.url
+        origin = None
 
-            description = None
-            if fetch_detail:
-                try:
-                    _, _, detail_body = self._fetcher.fetch(
-                        url,
-                        timeout=self.source.request.timeout_seconds,
-                        content_types=("html", "text"),
-                    )
-                    detail_soup = self._soup_from_body(detail_body)
-                    content_node = detail_soup.select_one(content_selector) if content_selector else None
-                    description = (
-                        self._clean_text(str(content_node)) if content_node is not None else None
-                    )
-                except Exception:
-                    description = None  # 单条 detail 失败不影响整个 source
-
-            results.append(
-                RawJob(
-                    source_id=self.source.id,
-                    source_name=self.source.name,
-                    title=title,
-                    source_job_id=None,
-                    source_url=url,
-                    published_at_raw=date_raw,
-                    description_raw=description,
-                    organization_hint=self.source.organization,
-                    location_hint=None,
-                    raw_payload={"list_item": str(node)[:2000]},
+        for page_index in range(max_pages):
+            if current in pages_seen:
+                self.warnings.append("分页出现重复链接，已停止翻页")
+                break
+            pages_seen.add(current)
+            try:
+                final_url, _, body = self._fetcher.fetch(
+                    current, timeout=self.source.request.timeout_seconds, content_types=("html", "text")
                 )
-            )
+            except Exception as exc:
+                if page_index == 0:
+                    raise
+                self.warnings.append(f"第 {page_index + 1} 页抓取失败：{str(exc)[:200]}")
+                break
+            if origin is None:
+                origin = _origin(final_url)
+            elif _origin(final_url) != origin:
+                self.warnings.append("分页被重定向到其他站点，已停止翻页")
+                break
+            if final_url != current and final_url in pages_seen:
+                self.warnings.append("分页重定向回已采集页面，已停止翻页")
+                break
+            pages_seen.add(final_url)
+            soup = self._soup_from_body(body)
+            nodes = soup.select(item_selector)
+            if not nodes:
+                self.warnings.append(f"第 {page_index + 1} 页列表选择器未匹配，需核查页面结构或访问状态")
+                break
+            before = len(jobs_seen)
+            for node in nodes:
+                url = public_link(final_url, self._select_attr(node, selectors.get("link") or "a", "href"))
+                title = self._select_text(node, selectors.get("title") or "a")
+                if not url or url in jobs_seen or not title or not title_require_filter(
+                    title, selectors.get("title_require_words")
+                ):
+                    continue
+                date_raw = self._extract_date_text(node, selectors)
+                if self.source.require_date and not date_raw:
+                    continue
+                jobs_seen.add(url)
+                excluded_words = list(self.source.filters.get("exclude_title_keywords") or [])
+                if self.source.filters.get("exclude_scope", "title") != "content":
+                    excluded_words += self.source.filters.get("exclude_keywords") or []
+                if any(str(word).lower() in title.lower() for word in excluded_words):
+                    # Preserve audit counts while spending the detail budget on
+                    # announcements, rather than on result/appointment notices.
+                    self.prefiltered_count += 1
+                    continue
+                if outside_history_window(self.source, title, date_raw):
+                    self.recency_prefiltered_count += 1
+                    continue
+                if len(results) >= max_items:
+                    self.warnings.append(f"达到 {max_items} 条采集上限；还有公告未抓取")
+                    return results
+                payload: dict = {
+                    "list_item": str(node)[:2000], "list_url": final_url,
+                    "detail_status": "not_requested", "attachments": [], "images": [],
+                }
+                description = None
+                if fetch_detail:
+                    try:
+                        article = read_article(self._fetcher, self.source, url)
+                        description = article["description"]
+                        payload.update(article["payload"])
+                        title, date_raw = reconcile_article_metadata(
+                            title, date_raw, article, payload, self.warnings, "list"
+                        )
+                        if payload["detail_status"] != "complete":
+                            self.warnings.append(f"{url}: {payload['detail_error']}")
+                    except Exception as exc:
+                        payload.update({"detail_status": "failed", "detail_error": str(exc)[:300]})
+                        self.warnings.append(f"详情抓取失败 {url}: {str(exc)[:150]}")
+                if outside_history_window(self.source, title, date_raw):
+                    self.recency_prefiltered_count += 1
+                    continue
+                results.append(RawJob(
+                    source_id=self.source.id, source_name=self.source.name, title=title,
+                    source_url=url, published_at_raw=date_raw, description_raw=description,
+                    organization_hint=self.source.organization,
+                    location_hint=self.source.location or self.source.province, raw_payload=payload,
+                ))
+            next_url = self._next_page(soup, final_url, body, page_index)
+            if not next_url:
+                break
+            if _origin(next_url) != origin:
+                self.warnings.append("下一页指向其他站点，已停止翻页")
+                break
+            if next_url in pages_seen:
+                self.warnings.append("分页出现重复链接，已停止翻页")
+                break
+            if page_index + 1 >= max_pages:
+                if self.source.scope == "history":
+                    self.warnings.append(f"达到 {max_pages} 页上限；仍有更早公告未遍历")
+                break
+            if len(jobs_seen) == before and page_index > 0:
+                if any(public_link(final_url, self._select_attr(n, selectors.get("link") or "a", "href"))
+                       in jobs_seen for n in nodes):
+                    self.warnings.append("分页未返回新的公告链接，已停止翻页")
+                    break
+            current = next_url
+        if not results and not self.warnings and not self.prefiltered_count and not self.recency_prefiltered_count:
+            self.warnings.append("列表可读取，但没有匹配的招聘条目；请核查筛选条件和来源结构")
         return results

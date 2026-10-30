@@ -146,7 +146,8 @@ export function buildSavePayload(
     description_raw: preview.source_text,
     // provenance 来自 Preview 本身，而不是独立的 React state —— 不可能串单
     source_url: preview.source_url,
-    status: "new",
+    // Historical evidence must not become a new live opportunity on import.
+    status: preview.reference_status === "historical" ? "closed" : "new",
     academic_details: {},
     import_audit: {
       ingestion_method: preview.source_type,
