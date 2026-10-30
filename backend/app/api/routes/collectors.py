@@ -1,5 +1,7 @@
 """Collector API（V0.2）：立即检查 / 运行历史 / Inbox 审核 / AI Extraction bridge。"""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -8,14 +10,16 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_ai_provider
 from app.collectors.config import ensure_sources_schema, load_enabled_sources, load_sources
 from app.db.session import get_db
-from app.models import CollectorRun, DiscoveredJob
+from app.models import CollectorRun, CollectorRunItem, DiscoveredJob
 from app.schemas.collector import (
     CollectorRunOut,
+    CollectorRunRequest,
     DiscoveredJobListPage,
     DiscoveredJobOut,
     DiscoveredJobUpdate,
 )
-from app.services import collector_runner
+from app.services import collector_tasks
+from app.services.announcement_reference import current_year, reference_notice, reference_status
 
 router = APIRouter(tags=["collectors"])
 
@@ -27,6 +31,9 @@ def _run_to_out(run: CollectorRun) -> CollectorRunOut:
         started_at=run.started_at,
         finished_at=run.finished_at,
         trigger=run.trigger,
+        mode=run.mode,
+        history_years=run.history_years,
+        province=run.province,
         source_count=run.source_count,
         completed_source_count=run.completed_source_count,
         discovered_count=run.discovered_count,
@@ -52,6 +59,7 @@ def _run_to_out(run: CollectorRun) -> CollectorRunOut:
                 "filtered_count": i.filtered_count,
                 "recency_skipped_count": i.recency_skipped_count,
                 "error_message": i.error_message,
+                "warning_count": i.warning_count,
             }
             for i in run.items
         ],
@@ -70,6 +78,11 @@ def _discovered_to_out(d: DiscoveredJob) -> DiscoveredJobOut:
         title_raw=d.title_raw,
         description_raw=d.description_raw,
         published_at_raw=d.published_at_raw,
+        announcement_year=d.announcement_year,
+        reference_status=reference_status(d.announcement_year),
+        province=d.province,
+        requirements_summary=d.requirements_summary,
+        benefits_summary=d.benefits_summary,
         organization_hint=d.organization_hint,
         location_hint=d.location_hint,
         status=d.status,
@@ -85,17 +98,49 @@ def _discovered_to_out(d: DiscoveredJob) -> DiscoveredJobOut:
 
 
 @router.post("/collectors/run", response_model=CollectorRunOut)
-def run_collectors(db: Session = Depends(get_db)):
+def run_collectors(payload: CollectorRunRequest | None = None, db: Session = Depends(get_db)):
     """立即执行一次 enabled sources（同步执行）。
 
     P0-1：配置错误的 source 也建 failed item，不阻塞其他正常 source。
     P1-7：legacy 空 sources.yaml 先迁移到 V0.2 默认（已有版本/用户主动清空尊重）。"""
     ensure_sources_schema()
     sources, config_errors = load_enabled_sources()
-    run = collector_runner.run_collectors(db, sources, config_errors=config_errors)
-    db.commit()
-    db.refresh(run)
-    return _run_to_out(run)
+    options = payload or CollectorRunRequest()
+    try:
+        sources = collector_tasks.select_sources(sources, options)
+        lease = collector_tasks.RunLease().acquire()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except collector_tasks.CollectorBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        run = collector_tasks.execute(db, sources, config_errors, options)
+        db.refresh(run)
+        return _run_to_out(run)
+    finally:
+        lease.release()
+
+
+@router.post("/collectors/start", status_code=202)
+def start_collectors(payload: CollectorRunRequest, db: Session = Depends(get_db)):
+    """Start a bounded crawl in the background; UI can poll the run audit."""
+    ensure_sources_schema()
+    sources, errors = load_enabled_sources()
+    try:
+        sources = collector_tasks.select_sources(sources, payload)
+        if not sources:
+            raise ValueError("没有匹配的已启用来源；历年补抓还需来源启用 history.enabled")
+        collector_tasks.start_run(db.get_bind(), sources, errors, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except collector_tasks.CollectorBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "started"}
+
+
+@router.get("/collectors/scheduler")
+def get_scheduler_status():
+    return collector_tasks.scheduler_status()
 
 
 @router.get("/collectors/runs", response_model=list[CollectorRunOut])
@@ -121,11 +166,14 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/collectors/sources")
-def list_source_configs():
+def list_source_configs(db: Session = Depends(get_db)):
     """展示 sources.yaml 当前配置（含 enabled 状态、sector 与配置错误）。
 
     sector 为 V0.3 来源/单位性质分类；category 为 legacy alias（同值）。"""
     sources, errors = load_sources()
+    latest: dict[str, CollectorRunItem] = {}
+    for item in db.scalars(select(CollectorRunItem).order_by(CollectorRunItem.id.desc())):
+        latest.setdefault(item.source_id, item)
     return {
         "sources": [
             {
@@ -137,6 +185,12 @@ def list_source_configs():
                 "category": s.sector,  # legacy alias
                 "organization": s.organization,
                 "url": s.url,
+                "province": s.province,
+                "history_enabled": s.history.get("enabled", False),
+                "coverage_note": s.raw.get("coverage_note"),
+                "last_status": latest[s.id].status if s.id in latest else None,
+                "last_error": latest[s.id].error_message if s.id in latest else None,
+                "last_run_at": latest[s.id].started_at if s.id in latest else None,
             }
             for s in sources
         ],
@@ -151,11 +205,26 @@ def list_discovered(
     sector: str | None = Query(None),
     organization: str | None = Query(None),
     q: str | None = Query(None),
+    province: str | None = Query(None, max_length=32),
+    announcement_year: int | None = Query(None, ge=2000, le=2100),
+    reference_status: Literal["historical", "current_year", "upcoming", "unknown"] | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
     stmt = select(DiscoveredJob)
+    if province:
+        stmt = stmt.where(DiscoveredJob.province == province)
+    if announcement_year:
+        stmt = stmt.where(DiscoveredJob.announcement_year == announcement_year)
+    if reference_status == "historical":
+        stmt = stmt.where(DiscoveredJob.announcement_year < current_year())
+    elif reference_status == "current_year":
+        stmt = stmt.where(DiscoveredJob.announcement_year == current_year())
+    elif reference_status == "upcoming":
+        stmt = stmt.where(DiscoveredJob.announcement_year > current_year())
+    elif reference_status == "unknown":
+        stmt = stmt.where(DiscoveredJob.announcement_year.is_(None))
     if status:
         stmt = stmt.where(DiscoveredJob.status == status)
     if source_id:
@@ -224,7 +293,10 @@ def extract_discovered(job_id: int, db: Session = Depends(get_db), provider=Depe
     if len(text.strip()) < 10:
         raise HTTPException(status_code=422, detail="该招聘材料缺少可解析的正文（未抓取 detail）")
     from app.ai.provider import AIError
-    from app.schemas.extraction import ExtractionPreviewOut
+    from app.schemas.extraction import MAX_TEXT_CHARS, ExtractionPreviewOut
+
+    if len(text) > MAX_TEXT_CHARS:
+        raise HTTPException(status_code=422, detail="公告正文过长，请先摘取相关岗位内容再解析")
 
     try:
         extraction, prompt_version = provider.extract_job(text.strip())
@@ -239,6 +311,9 @@ def extract_discovered(job_id: int, db: Session = Depends(get_db), provider=Depe
         provider=provider.name,
         model=getattr(provider, "model", None),
         prompt_version=prompt_version,
+        announcement_year=row.announcement_year,
+        reference_status=reference_status(row.announcement_year),
+        reference_notice=reference_notice(row.announcement_year),
     )
     if row.status in ("new", "possible_duplicate"):
         row.status = "reviewing"

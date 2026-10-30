@@ -162,6 +162,17 @@ export async function runCollectors() {
   return api<import("../types").CollectorRun>("/collectors/run", { method: "POST" });
 }
 
+export async function startCollectors(payload: import("../types").CollectorStartRequest) {
+  return api<{ status: "started" }>("/collectors/start", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getCollectorScheduler() {
+  return api<import("../types").CollectorScheduler>("/collectors/scheduler");
+}
+
 export async function listCollectorRuns(limit = 5) {
   return api<import("../types").CollectorRun[]>(`/collectors/runs?limit=${limit}`);
 }

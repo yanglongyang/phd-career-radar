@@ -24,6 +24,7 @@ collectors:
     enabled: true
     sector: university
     organization: 山西大学
+    province: 山西
     url: https://rsc.sxu.edu.cn/gkzp/jszpzp/index.htm
     request:
       timeout_seconds: 20
@@ -234,6 +235,7 @@ collectors:
     enabled: true
     sector: research_institute
     organization: 中国科学院山西煤炭化学研究所
+    province: 山西
     url: http://sxicc.cas.cn/join/gcc/
     request:
       timeout_seconds: 20
@@ -257,6 +259,7 @@ collectors:
     enabled: true
     sector: research_institute
     organization: 中国科学院山西煤炭化学研究所
+    province: 山西
     url: http://sxicc.cas.cn/join/bsh/
     request:
       timeout_seconds: 20

@@ -5,6 +5,7 @@ import { ApiError, api, extractPreview } from "../services/api";
 import { linkDiscoveredJob } from "../services/api";
 import type { ExtractionPreview, JobDetail } from "../types";
 import { buildSavePayload, seedValuesFromPreview, type FieldValue } from "../lib/extraction";
+import { referenceLabel, referenceNotice } from "../lib/reference";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, PageHeader, Select, Textarea } from "../components/ui";
 import {
   CONTRACT_TYPE_LABELS,
@@ -235,6 +236,11 @@ export default function JobImportPage() {
         </Card>
       ) : (
         <div className="space-y-4">
+          {preview.reference_status && <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+            <p className="font-medium">{referenceLabel(preview.reference_status, preview.announcement_year)}</p>
+            <p className="mt-1">{preview.reference_notice || referenceNotice(preview.reference_status)}</p>
+            {preview.reference_status === "historical" && <p className="mt-1">确认保存后将设为“已关闭”，保留原文与来源供比较参考。</p>}
+          </div>}
           {/* 审计信息与信息缺口 */}
           <Card>
             <CardContent className="flex flex-wrap items-center gap-2 py-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -417,7 +423,7 @@ export default function JobImportPage() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => navigate("/jobs")}>取消</Button>
             <Button onClick={() => save(false)} disabled={saveMutation.isPending || !values.title}>
-              {saveMutation.isPending ? "保存中…" : "确认无误，保存岗位"}
+              {saveMutation.isPending ? "保存中…" : preview.reference_status === "historical" ? "确认无误，保存历史参考" : "确认无误，保存岗位"}
             </Button>
           </div>
         </div>

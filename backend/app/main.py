@@ -26,6 +26,7 @@ from app.db.session import engine
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    scheduler = None
     # 开发便利：启动时自动补建缺失的表（生产/CI 用 alembic 管理结构）。
     # 测试通过 PCR_SKIP_STARTUP_DDL=1 跳过，避免触碰真实数据库文件。
     if os.environ.get("PCR_SKIP_STARTUP_DDL") != "1":
@@ -37,7 +38,35 @@ async def lifespan(_: FastAPI):
         ensure_missing_columns(engine)
         # V0.3.1 一次性数据修正：V0.3 之前发现的学校招聘旧记录回填为 university
         backfill_legacy_sectors(engine)
-    yield
+        from sqlalchemy.orm import Session
+
+        from app.services.announcement_reference import backfill_reference_metadata
+        from app.services.collector_tasks import (
+            CollectorBusyError,
+            CollectorScheduler,
+            RunLease,
+            recover_interrupted_runs,
+        )
+
+        backfill_reference_metadata(engine)
+        try:
+            lease = RunLease().acquire()
+        except CollectorBusyError:
+            pass
+        else:
+            try:
+                with Session(engine) as db:
+                    recover_interrupted_runs(db)
+            finally:
+                lease.release()
+        if os.environ.get("PCR_DISABLE_COLLECTOR_SCHEDULER") != "1":
+            scheduler = CollectorScheduler(engine)
+            scheduler.start()
+    try:
+        yield
+    finally:
+        if scheduler:
+            scheduler.stop()
 
 
 settings = get_settings()

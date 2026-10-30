@@ -16,7 +16,10 @@ from pathlib import Path
 import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_CONFIG_NAMES = ("scoring.yaml", "regions.yaml", "profile.yaml", "sources.yaml")
+DEFAULT_CONFIG_NAMES = (
+    "scoring.yaml", "regions.yaml", "profile.yaml", "sources.yaml",
+    "sources_shanxi.yaml", "collector_schedule.yaml",
+)
 
 
 def seed_user_config(default_config_dir: Path, user_config_dir: Path) -> None:

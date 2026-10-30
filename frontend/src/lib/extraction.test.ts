@@ -141,4 +141,21 @@ describe("buildSavePayload", () => {
     expect(p.deadline).toBe("2026-11-15");
     expect(p.academic_details?.contract_years).toBe(3);
   });
+
+  it("历史公告经用户确认后保存为closed，保留原文来源和待遇", () => {
+    const historical: ExtractionPreview = {
+      ...PREVIEW, reference_status: "historical", announcement_year: 2025,
+      extraction: { ...PREVIEW.extraction, salary_text: "2025年标准：30–45万元" },
+    };
+    const p = buildSavePayload(historical, seedValuesFromPreview(historical));
+    expect(p.status).toBe("closed");
+    expect(p.description_raw).toBe(PREVIEW.source_text);
+    expect(p.source_url).toBe(PREVIEW.source_url);
+    expect(p.salary_text).toBe("2025年标准：30–45万元");
+  });
+
+  it("普通导入与当年公告保留new状态", () => {
+    expect(buildSavePayload(PREVIEW, values).status).toBe("new");
+    expect(buildSavePayload({ ...PREVIEW, reference_status: "current_year" }, values).status).toBe("new");
+  });
 });

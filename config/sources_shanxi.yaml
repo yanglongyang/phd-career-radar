@@ -1,0 +1,547 @@
+# 山西招聘增量来源包。原 sources.yaml 保留；本包使用独立 id，按公告 URL 去重。
+# 核验日期：2026-10-30。enabled=false 是已知覆盖缺口，不计入自动采集成功。
+# 历史种子只在 history 模式运行；动态列表继续发现后续新公告。
+schema_version: 1
+
+collectors:
+  - id: shanxi_sxu_faculty
+    name: 山西大学教师招聘（正文与历年公告）
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 山西大学
+    province: 山西
+    location: 山西
+    url: https://rsc.sxu.edu.cn/gkzp/jszpzp/index.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    request: &shanxi_request
+      timeout_seconds: 18
+      user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: '.lm_list > ul > li'
+      title: a
+      link: a
+      date: span
+      title_require_words: [招聘, 诚聘, 引进, 博士后, 招收]
+    pagination: {next_text: [下一页], max_pages: 2, max_items: 25}
+    history: {enabled: true, years: 3, max_pages: 9, max_items: 60}
+    detail: &vsb_detail
+      fetch_detail: true
+      content_selector: '#vsb_content_2, #vsb_content, .v_news_content'
+    filters: &faculty_filters
+      include_keywords: [招聘, 诚聘, 引进, 博士, 科研, 人才]
+      exclude_keywords: [拟聘, 拟录用, 公示, 成绩, 资格审查, 资格复审, 面试公告, 体检, 考察, 递补, 附属子弟小学, 附属中学, 辅导员]
+
+  - id: shanxi_tyut_faculty
+    name: 太原理工大学人才引进（官方人事网）
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 太原理工大学
+    province: 山西
+    location: 山西
+    url: https://renshi.tyut.edu.cn/rczp/rcyj.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    coverage_note: 人事网部分年度公告未同步；2025年校级公告另有官方历史种子。不能由此列表缺项断言该年未招聘。
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: 'div.animate-onscroll[id^="line_"]'
+      title: 'a h2'
+      link: a
+      date: h2
+      title_require_words: [招聘, 诚聘, 引进, 博士后, 招收]
+    pagination: {next_selector: 'a.Next', next_text: [下页], max_pages: 2, max_items: 25}
+    history: {enabled: true, years: 3, max_pages: 5, max_items: 60}
+    detail: *vsb_detail
+    filters: *faculty_filters
+
+  - id: shanxi_sxau_faculty
+    name: 山西农业大学硕博招聘
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 山西农业大学
+    province: 山西
+    location: 山西
+    url: https://zzrsb.sxau.edu.cn/sbzp.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: 'ul.ej-news-list > li'
+      title: '.ej-news-word p[title]'
+      link: a
+      date: '.ej-news-deta'
+      title_require_words: [招聘, 引进, 博士后, 招收]
+    pagination: {next_selector: '.p_next a', max_pages: 2, max_items: 25}
+    history: {enabled: true, years: 3, max_pages: 6, max_items: 60}
+    detail: *vsb_detail
+    filters: *faculty_filters
+
+  - id: shanxi_sxnu_faculty
+    name: 山西师范大学师资引进
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 山西师范大学
+    province: 山西
+    location: 山西/太原
+    # 原 /rczp/gkzp1.htm 只列到2025；当前导航指向本地址，已发现2026公告。
+    url: https://www.sxnu.edu.cn/jsdw/szyj.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: 'li[id^="line_u"]'
+      title: h3
+      link: a
+      date: '.flex span'
+      title_require_words: [招聘, 引进, 博士后, 招收]
+    pagination: {next_selector: '.p_next a', next_text: [下页], max_pages: 2, max_items: 25}
+    history: {enabled: true, years: 3, max_pages: 8, max_items: 60}
+    detail: *vsb_detail
+    filters: *faculty_filters
+
+  - id: shanxi_nuc_faculty
+    name: 中北大学人力资源部招聘公告
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 中北大学
+    province: 山西
+    location: 山西/太原
+    # “历次人才招聘公告”栏目实际为空；有效公告发在通知公告。
+    url: https://rlzyglc.nuc.edu.cn/tzgg.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    coverage_note: 通知公告每页仅5条；历史回溯有页数上限，2025正式公告用已验证种子补足。待遇表为图片时保留原图待核验。
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: 'li[id^="line_u"]'
+      title: 'span.tit'
+      link: a
+      date: 'span.time'
+      title_require_words: [招聘, 诚聘, 引进, 博士后, 招收]
+    pagination: {next_selector: '.p_next a', max_pages: 3, max_items: 20}
+    history: {enabled: true, years: 3, max_pages: 24, max_items: 60}
+    detail: *vsb_detail
+    filters: *faculty_filters
+
+  - id: shanxi_tyust_faculty
+    name: 太原科技大学招聘公告
+    type: html_list
+    enabled: true
+    sector: university
+    organization: 太原科技大学
+    province: 山西
+    location: 山西/太原
+    url: https://www.tyust.edu.cn/index/tzgg.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    request: *shanxi_request
+    max_age_days: 365
+    # 列表将“日”放在“年月”前面；使用详情 .arc-info 的完整发布日期。
+    require_date: false
+    selectors:
+      item: 'li[id^="line_u"]'
+      title: h4
+      link: a
+      date: ''
+      title_require_words: [公开招聘博士, 人才引进, 诚聘, 博士后, 青年才俊]
+    pagination: {next_selector: '.p_next a', max_pages: 2, max_items: 25}
+    history: {enabled: true, years: 3, max_pages: 6, max_items: 60}
+    detail:
+      <<: *vsb_detail
+      date_selector: '.arc-info'
+    filters: *faculty_filters
+
+  - id: shanxi_hospitals_wjw
+    name: 山西省卫健委所属医院招聘（官方公告汇总）
+    type: html_list
+    enabled: true
+    sector: hospital
+    # 省卫健委是发布者，不是雇主；雇主由公告标题/正文识别。
+    organization: null
+    publisher: 山西省卫生健康委员会
+    organizations:
+      - 山西白求恩医院
+      - 山西省人民医院
+      - 山西医科大学第一医院
+      - 山西医科大学第二医院
+      - 山西省肿瘤医院
+      - 山西省儿童医院
+      - 山西省中医药研究院
+      - 山西省中医院
+      - 山西中医药大学附属医院
+      - 山西省心血管病医院
+      - 山西省眼科医院
+      - 山西省第二人民医院
+      - 山西省中西医结合医院
+      - 山西省煤炭中心医院
+      - 山西省针灸医院
+    province: 山西
+    location: 山西
+    url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/index.shtml
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: '.demo-right > ul > li'
+      # 每个li的第一个a为空；必须选第二个a。
+      title: 'a:nth-of-type(2)'
+      link: 'a:nth-of-type(2)'
+      date: span
+      title_require_words: [招聘, 引进, 博士后, 招收]
+    # 下一页由document.write输出，公开HTML中无静态锚点。只读取数字页码，不执行JS。
+    pagination: {url_template: 'index_{page}.shtml', start_page: 1, max_pages: 2, max_items: 30}
+    history: {enabled: true, years: 3, max_pages: 24, max_items: 80}
+    detail: &wjw_detail
+      fetch_detail: true
+      content_selector: '.trs_editor_view, .TRS_UEDITOR, .TRS_Editor'
+      # 页面meta残留2020模板，真实标题和发布日期以可见正文栏为准。
+      title_selector: '.boxC > h3'
+      date_selector: '.artxx'
+    filters:
+      include_keywords: [博士, 高层次, 科研, 人才, 医院, 医学, 药学, 生物, 招聘]
+      exclude_keywords: [拟聘, 拟录用, 公示, 成绩, 资格审查, 资格复审, 面试公告, 体检, 考察, 递补, 岗位核减, 乡村医生, 卫生专业技术资格]
+
+  - id: shanxi_university_history_seeds
+    name: 山西高校历年招聘与待遇（官方正文补采）
+    type: html_detail
+    enabled: true
+    sector: university
+    organization: null
+    province: 山西
+    location: 山西
+    url: https://rsc.sxu.edu.cn/gkzp/jszpzp/index.htm
+    verified_at: '2026-10-30'
+    verification_status: official_articles_verified
+    request: *shanxi_request
+    history: {enabled: true, only: true, years: 3, max_items: 30}
+    detail: *vsb_detail
+    filters: *faculty_filters
+    seeds:
+      - url: https://rsc.sxu.edu.cn/gkzp/jszpzp/bb62047d39764de186e21f7c79695d92.htm
+        title: 山西大学2025年专任教师招聘公告（太原校区）
+        published_at: '2025-04-07'
+        organization: 山西大学
+      - url: https://www.tyut.edu.cn/info/1026/61801.htm
+        title: 太原理工大学2025年诚聘海内外优秀青年博士
+        published_at: '2025-01-16'
+        organization: 太原理工大学
+      - url: https://renshi.tyut.edu.cn/info/1007/4339.htm
+        title: 太原理工大学2024年诚聘海内外优秀青年博士
+        published_at: '2024-03-28'
+        organization: 太原理工大学
+      - url: https://zzrsb.sxau.edu.cn/info/1058/5130.htm
+        title: 山西农业大学2025年公开招聘博士研究生公告
+        published_at: '2025-04-18'
+        organization: 山西农业大学
+      - url: https://zzrsb.sxau.edu.cn/info/1058/5065.htm
+        title: 山西农业大学2024年第二批博士招聘公告
+        published_at: '2024-10-21'
+        organization: 山西农业大学
+      - url: https://www.sxnu.edu.cn/info/1301/9828.htm
+        title: 山西师范大学2025年高层次人才招聘公告
+        published_at: '2025-03-24'
+        organization: 山西师范大学
+      - url: https://www.sxnu.edu.cn/info/1301/15657.htm
+        title: 山西师范大学2025年公开招聘博士研究生公告
+        published_at: '2025-04-25'
+        organization: 山西师范大学
+      - url: https://rlzyglc.nuc.edu.cn/info/1007/4549.htm
+        title: 中北大学2025年博士毕业生招聘公告
+        published_at: '2025-01-03'
+        organization: 中北大学
+      - url: https://www.tyust.edu.cn/info/1092/12042.htm
+        title: 太原科技大学2025年公开招聘博士研究生公告
+        published_at: '2025-04-18'
+        organization: 太原科技大学
+      - url: https://www.tyust.edu.cn/info/1092/12456.htm
+        title: 太原科技大学2025年公开招聘博士研究生补充公告
+        published_at: '2025-09-02'
+        organization: 太原科技大学
+
+  - id: shanxi_hospital_history_seeds
+    name: 山西医院2025年招聘与待遇（卫健委官方正文补采）
+    type: html_detail
+    enabled: true
+    sector: hospital
+    organization: null
+    publisher: 山西省卫生健康委员会
+    province: 山西
+    location: 山西
+    url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/index.shtml
+    verified_at: '2026-10-30'
+    verification_status: official_articles_verified
+    request: *shanxi_request
+    history: {enabled: true, only: true, years: 3, max_items: 20}
+    detail: *wjw_detail
+    filters: *faculty_filters
+    seeds:
+      - url: https://wjw.shanxi.gov.cn/tzgg/gsgg/202501/t20250123_9757470.shtml
+        title: 山西省人民医院2025年公开招聘博士研究生公告
+        published_at: '2025-01-23'
+        organization: 山西省人民医院
+      - url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/202503/t20250303_9779740.shtml
+        title: 山西白求恩医院2025年公开招聘博士研究生公告
+        published_at: '2025-03-03'
+        organization: 山西白求恩医院
+      - url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/202502/t20250225_9775956.shtml
+        title: 山西医科大学第一医院2025年公开招聘博士研究生公告
+        published_at: '2025-02-25'
+        organization: 山西医科大学第一医院
+      - url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/202503/t20250303_9779732.shtml
+        title: 山西医科大学第二医院2025年公开招聘博士研究生公告
+        published_at: '2025-03-03'
+        organization: 山西医科大学第二医院
+      - url: https://wjw.shanxi.gov.cn/tzgg/gsgg/202501/t20250123_9757495.shtml
+        title: 山西省肿瘤医院中国医学科学院肿瘤医院山西医院2025年公开招聘博士研究生公告
+        published_at: '2025-01-23'
+        organization: 山西省肿瘤医院
+      - url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/202503/t20250314_9788667.shtml
+        title: 山西省儿童医院（山西省妇幼保健院）2025年公开招聘博士研究生公告
+        published_at: '2025-03-14'
+        organization: 山西省儿童医院（山西省妇幼保健院）
+      - url: https://wjw.shanxi.gov.cn/zfxxgk/fdzdgknr/gggs/202503/t20250314_9788680.shtml
+        title: 山西省中医药研究院（山西省中医院）2025年公开招聘博士研究生公告
+        published_at: '2025-03-14'
+        organization: 山西省中医药研究院（山西省中医院）
+
+  - id: shanxi_yabao_jlu
+    name: 亚宝药业招聘（吉林大学官方就业网转载）
+    type: html_list
+    enabled: true
+    sector: enterprise
+    organization: 亚宝药业集团股份有限公司
+    publisher: 吉林大学就业网
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://jdjyw.jlu.edu.cn/portal/company/details?id=3fd9b895b5c9457993c838d84c4fb673
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    coverage_note: 单位专页动态列出校招和招聘快讯，只覆盖该企业向此校发布的信息；不是企业全量职位接口。
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: false
+    selectors:
+      item: 'ul.m-component-content__list__container > li'
+      title: a
+      link: a
+      date: ''
+      title_require_words: [亚宝]
+    pagination: {max_pages: 1, max_items: 20}
+    history: {enabled: true, years: 3, max_pages: 1, max_items: 30}
+    detail:
+      fetch_detail: true
+      content_selector: '.m-content-container'
+      title_selector: '.m-detail-container__title'
+      date_selector: '.m-detail-container__info'
+    filters:
+      include_keywords: [亚宝]
+      exclude_keywords: [拟聘, 拟录用, 成绩公示]
+
+  - id: shanxi_zhendong_tjcu
+    name: 振东制药招聘（天津商业大学官方就业网转载）
+    type: html_list
+    enabled: true
+    sector: enterprise
+    organization: 山西振东制药股份有限公司
+    publisher: 天津商业大学就业信息网
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://career.tjcu.edu.cn/company/index/id/7231.html
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    coverage_note: 企业专页动态职位列表；可能含硕士管培生，按真实学历要求保留，不改写成博士专岗。
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: 'ul.company_index_info_zpul > li'
+      title: '.zw_title .p1'
+      link: 'a.lizw'
+      date: '.zw_title .p2'
+      title_require_words: [研究, 研发, 管培, 博士, 硕士, 化学, 生物, 药, 质量, 招聘]
+    pagination: {max_pages: 1, max_items: 20}
+    history: {enabled: true, years: 3, max_pages: 1, max_items: 30}
+    detail:
+      fetch_detail: true
+      content_selector: '.s_midin_con > .s_left'
+      title_selector: '.zhaopinxx_con1 .p1'
+      date_selector: '.zhaopinxx_con1 .p3'
+      salary_selector: '.pay'
+    filters:
+      include_keywords: [研究, 研发, 管培, 博士, 硕士, 化学, 生物, 药, 质量]
+      exclude_keywords: [拟聘, 拟录用, 成绩公示]
+
+  - id: shanxi_pharma_nwsuaf
+    name: 山西医药企业定向监测（西北农林科技大学官方就业转载）
+    type: html_list
+    enabled: true
+    sector: enterprise
+    organization: null
+    publisher: 西北农林科技大学食品科学与工程学院
+    organizations: [亚宝药业集团股份有限公司, 山西振东制药股份有限公司, 山西锦波生物医药股份有限公司, 山西仟源医药集团股份有限公司, 国药集团威奇达药业有限公司, 山西康宝生物科技有限公司, 山西普德药业有限公司]
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://food.nwsuaf.edu.cn/zhdt/jyxx/index.htm
+    verified_at: '2026-10-30'
+    verification_status: html_verified
+    coverage_note: 仅抓取标题命中山西目标企业的公告；已核实亚宝2025正文，其他企业有无公告取决于发布者，不能算已覆盖全部职位。
+    request: *shanxi_request
+    max_age_days: 365
+    require_date: true
+    selectors:
+      item: '.sort_rightcont > ul > li'
+      title: a
+      link: a
+      date: 'span.date'
+      title_require_words: [亚宝, 山西振东, 锦波生物, 山西仟源, 国药集团威奇达, 山西康宝, 山西普德]
+    pagination: {next_text: [下一页], max_pages: 2, max_items: 20}
+    history: {enabled: true, years: 3, max_pages: 24, max_items: 30}
+    detail:
+      fetch_detail: true
+      content_selector: '.sort_rightcont2 .cont'
+    filters:
+      include_keywords: [亚宝, 山西振东, 锦波生物, 山西仟源, 国药集团威奇达, 山西康宝, 山西普德]
+      exclude_keywords: [拟聘, 拟录用, 成绩公示]
+
+  - id: shanxi_enterprise_history_seeds
+    name: 山西企业历年招聘与待遇（高校官方就业网存档）
+    type: html_detail
+    enabled: true
+    sector: enterprise
+    organization: null
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://food.nwsuaf.edu.cn/zhdt/jyxx/index.htm
+    verified_at: '2026-10-30'
+    verification_status: official_reposts_verified
+    request: *shanxi_request
+    history: {enabled: true, only: true, years: 3, max_items: 20}
+    detail:
+      fetch_detail: true
+      content_selector: '.sort_rightcont2 .cont, .m-content-container, .s_midin_con > .s_left, #vsb_content, #vsb_content_2, .v_news_content'
+      salary_selector: '.pay'
+    filters:
+      include_keywords: [亚宝, 振东, 管培, 招聘]
+      exclude_keywords: [拟聘, 拟录用, 成绩公示]
+    seeds:
+      - url: https://food.nwsuaf.edu.cn/zhdt/jyxx/7611f141bd114367b57cde5b888df6a8.htm
+        title: 亚宝药业集团招聘简章
+        published_at: '2025-11-06'
+        organization: 亚宝药业集团股份有限公司
+      - url: https://jdjyw.jlu.edu.cn/portal/jyzp/recruit/details?id=461df77431cb42e8b1d93581826c1282
+        title: 亚宝药业集团2024年秋季校招生招聘简章
+        published_at: '2024-09-29'
+        organization: 亚宝药业集团股份有限公司
+      - url: https://career.tjcu.edu.cn/correcruit/content/id/13526.html
+        title: 26届硕士管培生
+        published_at: '2025-12-26'
+        organization: 山西振东制药股份有限公司
+      - url: https://zsjy.czmc.edu.cn/info/1011/42511.htm
+        title: 山西振东制药股份有限公司招聘简章
+        published_at: '2025-07-17'
+        organization: 山西振东制药股份有限公司
+
+  # 下列缺口显式保留。禁用源不应在UI中被统计为“已自动覆盖”。
+  - id: shanxi_sxmu_official_pending
+    name: 山西医科大学官方公告（访问待恢复）
+    type: html_detail
+    enabled: false
+    sector: university
+    organization: 山西医科大学
+    province: 山西
+    location: 山西
+    url: https://rst.shanxi.gov.cn/ztzl/zpxx/szsydwzpgg/202504/t20250425_9820348.shtml
+    verified_at: '2026-10-30'
+    verification_status: official_link_attributed_fetch_failed
+    coverage_note: 该人社厅原文链接由多个招聘转载页标明；学校官网及省人社直连返回503，尚未验证正文选择器，不能算已接通。恢复后先验证再启用。
+    request: *shanxi_request
+    history: {enabled: true, only: true, years: 3, max_items: 5}
+    seeds:
+      - url: https://rst.shanxi.gov.cn/ztzl/zpxx/szsydwzpgg/202504/t20250425_9820348.shtml
+        title: 山西医科大学2025年公开招聘博士研究生公告
+        published_at: '2025-04-25'
+        organization: 山西医科大学
+
+  - id: shanxi_zhendong_official_pending
+    name: 振东集团官方招聘系统（待接入）
+    type: html_list
+    enabled: false
+    sector: enterprise
+    organization: 山西振东制药股份有限公司
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://zdbj2019.zhiye.com/
+    verified_at: '2026-10-30'
+    verification_status: official_link_verified_dynamic
+    coverage_note: 振东集团官网“加入我们”直接链接此站；招聘页依赖JavaScript，尚未验证公开职位接口。当前自动覆盖来自高校官方转载。
+
+  - id: shanxi_yabao_official_pending
+    name: 亚宝药业官方招聘系统（待接入）
+    type: html_list
+    enabled: false
+    sector: enterprise
+    organization: 亚宝药业集团股份有限公司
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://yabaoyaoye1.zhiye.com/
+    verified_at: '2026-10-30'
+    verification_status: official_repost_link_verified_dynamic
+    coverage_note: 吉林大学官方2024招聘简章给出的企业网申地址；北森动态站点尚未实现适配，当前自动覆盖来自高校官方转载。
+
+  - id: shanxi_jinbo_official_pending
+    name: 锦波生物官方招聘入口（待接入职位平台）
+    type: html_list
+    enabled: false
+    sector: enterprise
+    organization: 山西锦波生物医药股份有限公司
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://www.sxjbswyy.com/h-col-145.html
+    verified_at: '2026-10-30'
+    verification_status: official_entry_verified_external_jobs
+    coverage_note: 官网“人才招聘”仅图片及智联招聘外链，无岗位列表；尚未接通具体职位采集，不能显示为零职位或已覆盖。
+
+  - id: shanxi_qianyuan_official_pending
+    name: 仟源医药官方招聘入口（待补可靠职位源）
+    type: html_list
+    enabled: false
+    sector: enterprise
+    organization: 山西仟源医药集团股份有限公司
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://www.cy-pharm.com/pages/jobs.html
+    verified_at: '2026-10-30'
+    verification_status: official_entry_verified_no_public_jobs
+    coverage_note: 官网可读取，但招贤纳士链接指向51job雇主后台，不是公开职位页；不采集该后台，也不把招聘理念页面当招聘公告。
+
+  - id: shanxi_weiqida_official_pending
+    name: 国药威奇达官方招聘（已迁移国聘，待接入）
+    type: html_list
+    enabled: false
+    sector: state_owned
+    organization: 国药集团威奇达药业有限公司
+    province: 山西
+    location: 工作地点以公告为准
+    url: https://www.weiqida.com/wqd/rczp/xyzp/A006007003Gone1.html
+    verified_at: '2026-10-30'
+    verification_status: official_entry_verified_migrated
+    coverage_note: 官网2025-09-26声明校园招聘统一迁移国聘；原人才招聘/工作机会列表为空不能解释为没有招聘。国聘职位适配尚未实现。
+    reference_url: https://www.weiqida.com/wqd/xinxigk/xggg/2025/9/I1421178428995928064.html

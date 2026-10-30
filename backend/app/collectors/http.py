@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from urllib.parse import urljoin, urlparse
 
@@ -16,6 +17,30 @@ import httpx
 USER_AGENT_DEFAULT = "phd-career-radar/0.2 (+personal job discovery tool)"
 MAX_BODY_BYTES = 5 * 1024 * 1024
 MAX_REDIRECTS = 5
+
+
+def decode_page(body: bytes, content_type: str) -> str:
+    """Honor declared Chinese encodings and HTML meta charset without executing HTML."""
+    if body.startswith(b"\xef\xbb\xbf"):
+        return body.decode("utf-8-sig", errors="replace")
+    if body.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return body.decode("utf-16", errors="replace")
+    declaration = re.search(r"charset\s*=\s*[\"']?([\w-]+)", content_type, re.I)
+    if declaration is None:
+        head = body[:8192].decode("ascii", errors="ignore")
+        declaration = re.search(r"<meta\b[^>]*charset\s*=\s*[\"']?([\w-]+)", head, re.I)
+    encoding = declaration.group(1).lower() if declaration else "utf-8"
+    if encoding in ("gb2312", "gbk", "x-gbk"):
+        encoding = "gb18030"
+    allowed = {"utf-8", "utf8", "gb18030", "big5", "utf-16", "windows-1252", "iso-8859-1"}
+    if encoding not in allowed:
+        encoding = "utf-8"
+    for candidate in dict.fromkeys((encoding, "utf-8", "gb18030")):
+        try:
+            return body.decode(candidate)
+        except UnicodeDecodeError:
+            continue
+    return body.decode("utf-8", errors="replace")
 
 
 class SafeFetchError(ValueError):
@@ -61,8 +86,6 @@ class SafeFetcher:
                             body += chunk
                             if len(body) > self.max_bytes:
                                 raise SafeFetchError("响应体过大（超过大小限制）")
-                            if len(body) == self.max_bytes:
-                                break
                     return status, content_type, location, str(resp.url), body
         except httpx.HTTPError as e:
             raise SafeFetchError(f"抓取失败（{e.__class__.__name__}）") from e
@@ -74,14 +97,16 @@ class SafeFetcher:
 
         - 逐跳校验目标地址（防重定向进入内网）；
         - 可选 Content-Type 基础验证；
-        - body 以 utf-8 解码（失败时 errors=replace）。
+        - 根据 HTTP/HTML charset 解码，兼容 GB18030 旧站点。
         """
         if not (url.startswith("http://") or url.startswith("https://")):
             raise SafeFetchError("仅支持 http/https 链接")
         current = url
         for _ in range(MAX_REDIRECTS + 1):
-            host = urlparse(current).hostname
-            assert_public_host(host)
+            parsed = urlparse(current)
+            if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+                raise SafeFetchError("仅支持不含用户名密码的 http/https 链接")
+            assert_public_host(parsed.hostname)
             status, content_type, location, final_url, body = self._once(current, timeout)
             if status in (301, 302, 303, 307, 308):
                 if not location:
@@ -91,12 +116,8 @@ class SafeFetcher:
             if status >= 400:
                 raise SafeFetchError(f"HTTP {status}")
             if content_types and content_type and not any(
-                ct in content_type for ct in content_types
+                ct.lower() in content_type.lower() for ct in content_types
             ):
                 raise SafeFetchError(f"Content-Type 不符合预期: {content_type.split(';')[0]}")
-            try:
-                text = body.decode("utf-8")
-            except UnicodeDecodeError:
-                text = body.decode("utf-8", errors="replace")
-            return final_url, content_type, text
+            return final_url, content_type, decode_page(body, content_type)
         raise SafeFetchError(f"重定向次数过多（>{MAX_REDIRECTS}）")

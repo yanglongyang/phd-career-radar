@@ -235,6 +235,9 @@ export interface JobExtraction {
 }
 
 export interface ExtractionPreview {
+  announcement_year?: number | null;
+  reference_status?: "historical" | "current_year" | "upcoming" | "unknown";
+  reference_notice?: string | null;
   source_type: "text" | "url";
   source_url: string | null;
   source_text: string;
@@ -410,6 +413,7 @@ export interface CollectorRunItem {
   possible_duplicate_count: number;
   filtered_count: number;
   recency_skipped_count: number;
+  warning_count: number;
   error_message: string | null;
 }
 
@@ -419,6 +423,8 @@ export interface CollectorRun {
   started_at: string;
   finished_at: string | null;
   trigger: string;
+  mode: "recent" | "history";
+  history_years: number | null;
   source_count: number;
   completed_source_count: number;
   discovered_count: number;
@@ -442,6 +448,11 @@ export interface DiscoveredJob {
   title_raw: string | null;
   description_raw: string | null;
   published_at_raw: string | null;
+  announcement_year: number | null;
+  reference_status: "historical" | "current_year" | "upcoming" | "unknown";
+  province: string | null;
+  requirements_summary: string | null;
+  benefits_summary: string | null;
   organization_hint: string | null;
   location_hint: string | null;
   status: string;
@@ -464,6 +475,29 @@ export interface CollectorSource {
   category: string;
   organization: string | null;
   url: string;
+  province: string | null;
+  history_enabled: boolean;
+  coverage_note: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  last_run_at: string | null;
+}
+
+export interface CollectorStartRequest {
+  mode: "recent" | "history";
+  province?: string;
+  history_years?: number;
+  source_ids?: string[];
+}
+
+export interface CollectorScheduler {
+  enabled: boolean;
+  running: boolean;
+  interval_hours: number;
+  history_interval_hours: number;
+  history_years: number;
+  province: string | null;
+  last_error: string | null;
 }
 
 export interface CollectorSourcesResponse {

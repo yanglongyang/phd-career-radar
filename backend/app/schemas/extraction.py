@@ -34,6 +34,9 @@ class ExtractionPreviewOut(BaseModel):
     provider: str
     model: str | None
     prompt_version: str
+    announcement_year: int | None = None
+    reference_status: str | None = None
+    reference_notice: str | None = None
 
 
 class ImportAuditIn(BaseModel):

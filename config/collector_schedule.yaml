@@ -1,0 +1,7 @@
+# 仅在应用/后端运行时自动采集；关闭电脑或应用后不运行。
+# 首次启动后约20秒开始检查；运行时间记录在本地数据库，重启不重复补抓。
+enabled: true
+province: 山西
+interval_hours: 12
+history_interval_hours: 168
+history_years: 3

@@ -63,7 +63,9 @@ def ensure_missing_columns(engine, metadata=None) -> list[str]:
                 elif not col.nullable:
                     default = 0
                 if default is not None:
-                    ddl += f" DEFAULT {default}"
+                    # SQL string defaults must be quoted (e.g. mode='recent').
+                    literal = "'" + default.replace("'", "''") + "'" if isinstance(default, str) else str(default)
+                    ddl += f" DEFAULT {literal}"
                 conn.execute(text(ddl))
                 if col.index:
                     # SQLite 的 ADD COLUMN 不能直接带索引 → 补列后单独建索引

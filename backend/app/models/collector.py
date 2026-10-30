@@ -26,6 +26,9 @@ class CollectorRun(Base):
 
     status: Mapped[str] = mapped_column(String(24), default="running")  # running/completed/partial_failure/failed
     trigger: Mapped[str] = mapped_column(String(16), default="manual")
+    mode: Mapped[str] = mapped_column(String(16), default="recent")
+    history_years: Mapped[int | None] = mapped_column(Integer)
+    province: Mapped[str | None] = mapped_column(String(32))
 
     source_count: Mapped[int] = mapped_column(Integer, default=0)
     completed_source_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -68,6 +71,7 @@ class CollectorRunItem(Base):
     recency_skipped_count: Mapped[int] = mapped_column(Integer, default=0)
 
     error_message: Mapped[str | None] = mapped_column(String(500))  # 长度限制，不存敏感头
+    warning_count: Mapped[int] = mapped_column(Integer, default=0)
 
     run: Mapped[CollectorRun] = relationship(back_populates="items")
 
@@ -95,12 +99,18 @@ class DiscoveredJob(Base):
     source_url: Mapped[str] = mapped_column(String(1024))
 
     canonical_url: Mapped[str | None] = mapped_column(String(1024), unique=True, index=True)
+    # Group snapshots when an employer reuses the same URL for a new year.
+    url_identity: Mapped[str | None] = mapped_column(String(1024), index=True)
     # 确定性 fingerprint（Level 3，无稳定 source_job_id 时）：normalize(org)+normalize(title)+path
     fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
 
     title_raw: Mapped[str | None] = mapped_column(String(512))
     description_raw: Mapped[str | None] = mapped_column(Text)
     published_at_raw: Mapped[str | None] = mapped_column(String(64))
+    announcement_year: Mapped[int | None] = mapped_column(Integer, index=True)
+    province: Mapped[str | None] = mapped_column(String(32), index=True)
+    requirements_summary: Mapped[str | None] = mapped_column(Text)
+    benefits_summary: Mapped[str | None] = mapped_column(Text)
 
     organization_hint: Mapped[str | None] = mapped_column(String(256))
     location_hint: Mapped[str | None] = mapped_column(String(128))
